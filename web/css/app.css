@@ -137,6 +137,11 @@ body {
   opacity: 0.55;
 }
 
+/* 面板打开时隐藏定位 FAB（否则会被面板盖住，看着能点实际点不到） */
+body.sheet-open .fab {
+  display: none;
+}
+
 /* ===== 底部 Tab ===== */
 .tabbar {
   position: fixed;
@@ -255,6 +260,7 @@ body {
 .sheet-body {
   padding: 12px 14px calc(env(safe-area-inset-bottom) + 14px);
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
@@ -336,8 +342,10 @@ body {
 
 .results {
   display: grid;
+  grid-template-columns: minmax(0, 1fr); /* 防止 grid 轨道被 nowrap 文本撑宽，把右侧按钮挤出屏幕 */
   gap: 8px;
   margin-top: 10px;
+  overflow: hidden;
 }
 
 .empty {
@@ -352,6 +360,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -390,6 +399,7 @@ body {
 
 .result-actions {
   display: flex;
+  flex: none;
   gap: 6px;
 }
 
@@ -978,5 +988,13 @@ body.kb-open .toast {
 
   .action-card {
     margin-bottom: 0;
+  }
+}
+
+/* 横屏/矮屏：给面板多一点高度，避免「规划路线」按钮要滚很久才出来 */
+@media (max-height: 520px) {
+  .sheet {
+    max-height: 80vh;
+    max-height: 80dvh;
   }
 }
