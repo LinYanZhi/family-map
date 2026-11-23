@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a1622">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>家庭地图</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%230d2033'/%3E%3Cpath d='M16 7c3.3 0 6 2.7 6 6 0 4.5-6 12-6 12S10 17.5 10 13c0-3.3 2.7-6 6-6z' fill='%2335d07f'/%3E%3Ccircle cx='16' cy='13' r='2.2' fill='%230a1622'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/app.css?v=0.1.0">
+</head>
+<body>
+  <main class="stage">
+    <div class="grid" aria-hidden="true"></div>
+    <section class="card">
+      <p class="eyebrow">阶段 1 · 链路验证</p>
+      <h1>家庭地图</h1>
+      <p class="sub">本机服务、nginx、公网隧道打通检查</p>
+
+      <ul class="checks">
+        <li><span class="dot ok" data-dot="page"></span><span>页面已加载</span></li>
+        <li><span class="dot" data-dot="api"></span><span data-text="api">检测服务接口…</span></li>
+        <li><span class="dot" data-dot="https"></span><span data-text="https">检测 HTTPS…</span></li>
+      </ul>
+
+      <p class="hint">地图与定位会在阶段 2 接入高德 JS API。当前页面只验证「手机能打开 + 服务在线」。</p>
+
+      <button id="retry" type="button" hidden>重试</button>
+
+      <p class="meta">
+        <span id="version">v?</span>
+        <span aria-hidden="true">·</span>
+        <span id="now">--</span>
+      </p>
+    </section>
+  </main>
+  <script type="module" src="js/app.js?v=0.1.0"></script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+# nginx 程序文件（各机自行放，不进 git）
+deploy/nginx/nginx.exe
+deploy/nginx/conf/*.local
+deploy/nginx/logs/
+deploy/nginx/temp/
+
+# 自签证书与私钥
+deploy/tls/
+
+# 本地密钥（阶段 2 高德 key 等）
+deploy/secrets.local.json
+
+# 运行态与用户数据
+data/*.pid
+data/*.log
+data/*.json
+!data/.gitkeep
+
+# 隧道地址（每台机器/每条隧道不同）
+deploy/public-url.txt
+
+# 临时产物
+_tmp/
+.debug/
