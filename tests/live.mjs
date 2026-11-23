@@ -76,6 +76,14 @@ if (destination) {
   } catch (err) {
     fail('步行路线可用', err);
   }
+
+  try {
+    const plans = await getJson(`/api/route/plans?mode=driving&origin=113.272674,23.156789&destination=${destination[0]},${destination[1]}&waypoints=113.32,23.14&direct=1`);
+    check('多方案返回', Array.isArray(plans.plans) && plans.plans.length >= 1, `plans=${plans.plans?.length} labels=${(plans.plans || []).map((item) => item.label).join('/')}`);
+    check('直达对比返回', Boolean(plans.direct && plans.direct.distance > 0), plans.direct ? `${plans.direct.distance} 米` : 'missing');
+  } catch (err) {
+    fail('多方案返回', err);
+  }
 } else {
   console.log('SKIP  路线测试（拿不到目的地坐标）');
 }

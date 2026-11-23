@@ -7,6 +7,7 @@ import path from 'node:path';
 const CACHE_MAX = 600;
 const RATE_WINDOW_MS = 60 * 1000;
 const RATE_MAX = 90;
+const MIN_OUTBOUND_INTERVAL_MS = 350; // 高德个人 key 有 QPS 限制，串行 + 间隔最稳
 
 // 不同接口的缓存时长：POI 一天、逆地理七天、路线三十分钟（路况会变）
 const TTL_RULES = [
@@ -58,6 +59,22 @@ function mergePolyline(steps) {
 function ttlFor(pathname) {
   const rule = TTL_RULES.find((item) => pathname.startsWith(item.prefix));
   return rule ? rule.ttl : DEFAULT_TTL;
+}
+
+let lastOutboundAt = 0;
+let outboundQueue = Promise.resolve();
+
+// 所有出站高德请求串行化（缓存命中不排队），并保持最小间隔，避免触发 QPS 限制
+function enqueueOutbound(task) {
+  const run = outboundQueue.then(task, task);
+  outboundQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function waitOutboundSlot() {
+  const waitMs = Math.max(0, lastOutboundAt + MIN_OUTBOUND_INTERVAL_MS - Date.now());
+  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+  lastOutboundAt = Date.now();
 }
 
 export function createAmapClient({ secretsFile, cacheFile = null, fetchImpl = globalThis.fetch }) {
@@ -136,29 +153,52 @@ export function createAmapClient({ secretsFile, cacheFile = null, fetchImpl = gl
     }
     if (cached) cache.delete(cacheKey);
 
-    assertRate();
     const query = new URLSearchParams({ ...params, key }).toString();
-    let res;
-    try {
-      res = await fetchImpl(`https://restapi.amap.com${pathname}?${query}`, {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(8000),
-      });
-    } catch (err) {
-      throw new AmapError(`高德接口网络错误：${err.message}`, 502, 'amap_network_error');
-    }
-    if (!res.ok) throw new AmapError(`高德接口 HTTP ${res.status}`, 502, 'amap_http_error');
+    const url = `https://restapi.amap.com${pathname}?${query}`;
 
-    const data = await res.json().catch(() => null);
-    if (!data) throw new AmapError('高德接口返回非 JSON', 502, 'amap_bad_json');
-    if (data.status !== '1') {
-      throw new AmapError(`高德接口错误：${data.info || 'unknown'}（${data.infocode || '-'}）`, 502, 'amap_api_error');
-    }
+    return enqueueOutbound(async () => {
+      // 排队期间可能已被其他请求填充
+      const again = cache.get(cacheKey);
+      if (again && Date.now() - again.at < ttlFor(pathname)) {
+        return { data: again.data, cacheHit: true };
+      }
 
-    cache.set(cacheKey, { at: Date.now(), data });
-    prune();
-    scheduleSave();
-    return { data, cacheHit: false };
+      assertRate();
+      let attempt = 0;
+      while (attempt < 3) {
+        attempt += 1;
+        await waitOutboundSlot();
+
+        let res;
+        try {
+          res = await fetchImpl(url, {
+            headers: { Accept: 'application/json' },
+            signal: AbortSignal.timeout(8000),
+          });
+        } catch (err) {
+          throw new AmapError(`高德接口网络错误：${err.message}`, 502, 'amap_network_error');
+        }
+        if (!res.ok) throw new AmapError(`高德接口 HTTP ${res.status}`, 502, 'amap_http_error');
+
+        const data = await res.json().catch(() => null);
+        if (!data) throw new AmapError('高德接口返回非 JSON', 502, 'amap_bad_json');
+        if (data.status !== '1') {
+          const infoCode = String(data.infocode || '');
+          // 10021 = CUQPS 并发/QPS 超限：退避后重试
+          if (infoCode === '10021' && attempt < 3) {
+            await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+            continue;
+          }
+          throw new AmapError(`高德接口错误：${data.info || 'unknown'}（${infoCode || '-'}）`, 502, 'amap_api_error');
+        }
+
+        cache.set(cacheKey, { at: Date.now(), data });
+        prune();
+        scheduleSave();
+        return { data, cacheHit: false };
+      }
+      throw new AmapError('高德接口繁忙，请稍后再试', 502, 'amap_qps_limited');
+    });
   }
 
   async function searchPoi({ keywords, city = '广州' }) {
@@ -196,10 +236,13 @@ export function createAmapClient({ secretsFile, cacheFile = null, fetchImpl = gl
     };
   }
 
-  async function route({ mode = 'driving', origin, destination, waypoints = '' }) {
+  async function route({ mode = 'driving', origin, destination, waypoints = '', strategy = null }) {
     const safeMode = DIRECTIONS.has(mode) ? mode : 'driving';
     const params = { origin, destination, extensions: 'base' };
-    if (safeMode === 'driving' && waypoints) params.waypoints = waypoints;
+    if (safeMode === 'driving') {
+      if (waypoints) params.waypoints = waypoints;
+      if (strategy !== null && strategy !== undefined && strategy !== '') params.strategy = String(strategy);
+    }
 
     const { data, cacheHit } = await call(`/v3/direction/${safeMode}`, params);
     const routePath = data.route?.paths?.[0];

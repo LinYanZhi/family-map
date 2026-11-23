@@ -85,6 +85,12 @@ check('route 非法坐标返回 400', routeBad.status === 400, `status=${routeBa
 const routeBadWp = await request(HTTP_BASE, '/api/route?mode=driving&origin=113.2,23.1&destination=113.3,23.2&waypoints=bad');
 check('route 非法途径点返回 400', routeBadWp.status === 400, `status=${routeBadWp.status}`);
 
+const plansBad = await request(HTTP_BASE, '/api/route/plans?mode=driving&origin=x&destination=y');
+check('plans 非法坐标返回 400', plansBad.status === 400, `status=${plansBad.status}`);
+
+const plansBadStrategy = await request(HTTP_BASE, '/api/route/plans?mode=driving&origin=113.2,23.1&destination=113.3,23.2&strategies=abc');
+check('plans 非法策略返回 400', plansBadStrategy.status === 400, `status=${plansBadStrategy.status}`);
+
 const mapModule = await request(HTTP_BASE, '/js/map.js');
 check('模块 js/map.js 可加载', mapModule.status === 200 && mapModule.body.includes('MAP_STYLES'), `status=${mapModule.status}`);
 

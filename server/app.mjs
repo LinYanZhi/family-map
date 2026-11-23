@@ -24,6 +24,11 @@ const amapClient = createAmapClient({
   cacheFile: path.join(DATA_DIR, 'amap-cache.json'),
 });
 const LOCATION_RE = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
+const PLAN_STRATEGIES = [
+  { strategy: '0', label: '推荐' },
+  { strategy: '2', label: '距离最短' },
+  { strategy: '4', label: '躲避拥堵' },
+];
 
 function sendAmapError(res, err) {
   if (err instanceof AmapError) return json(res, err.status, { ok: false, error: err.code, message: err.message });
@@ -224,6 +229,62 @@ async function handleRequest(req, res) {
       try {
         const { cacheHit, ...result } = await amapClient.route({ mode, origin, destination, waypoints: waypoints.join(';') });
         return json(res, 200, { ok: true, ...result }, { 'X-Amap-Cache': cacheHit ? 'hit' : 'miss' });
+      } catch (err) {
+        return sendAmapError(res, err);
+      }
+    }
+
+    // 多方案（驾车按策略生成最多 3 条）+ 带途径点时的「直达」对比方案
+    if (pathname === '/api/route/plans') {
+      if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+      const mode = url.searchParams.get('mode') || 'driving';
+      const origin = url.searchParams.get('origin') || '';
+      const destination = url.searchParams.get('destination') || '';
+      const rawWaypoints = url.searchParams.get('waypoints') || '';
+      const waypoints = rawWaypoints ? rawWaypoints.split(';').filter(Boolean) : [];
+      const wantDirect = url.searchParams.get('direct') === '1';
+      const rawStrategies = (url.searchParams.get('strategies') || '0,2,4')
+        .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 3);
+      if (!LOCATION_RE.test(origin) || !LOCATION_RE.test(destination)) {
+        return json(res, 400, { ok: false, error: 'bad_point' });
+      }
+      if (waypoints.length > 3 || waypoints.some((w) => !LOCATION_RE.test(w))) {
+        return json(res, 400, { ok: false, error: 'bad_waypoints' });
+      }
+      if (rawStrategies.length === 0 || rawStrategies.some((s) => !/^\d$/.test(s))) {
+        return json(res, 400, { ok: false, error: 'bad_strategy' });
+      }
+      const waypointStr = waypoints.join(';');
+      const wanted = mode === 'driving' ? rawStrategies : ['0'];
+      try {
+        const plans = [];
+        const seen = new Set();
+        for (const strategy of wanted) {
+          const result = await amapClient.route({
+            mode,
+            origin,
+            destination,
+            waypoints: waypointStr,
+            strategy: mode === 'driving' ? strategy : undefined,
+          });
+          const dedupeKey = `${Math.round(result.distance / 500)}|${Math.round(result.duration / 60)}`;
+          if (seen.has(dedupeKey)) continue;
+          seen.add(dedupeKey);
+          const meta = PLAN_STRATEGIES.find((item) => item.strategy === strategy);
+          const { cacheHit, ...plan } = result;
+          plans.push({ strategy: Number(strategy), label: meta?.label || `方案${plans.length + 1}`, ...plan });
+        }
+        if (!plans.length) throw new AmapError('没有找到可用路线', 404, 'amap_no_route');
+
+        let directPlan = null;
+        if (wantDirect && waypointStr && mode === 'driving') {
+          try {
+            const directResult = await amapClient.route({ mode, origin, destination, waypoints: '' });
+            const { cacheHit, ...plan } = directResult;
+            directPlan = { label: '直达', ...plan };
+          } catch { /* 对比失败不影响主方案 */ }
+        }
+        return json(res, 200, { ok: true, mode, plans, direct: directPlan });
       } catch (err) {
         return sendAmapError(res, err);
       }

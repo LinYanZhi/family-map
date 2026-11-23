@@ -30,4 +30,16 @@ export const api = {
     if (waypoints.length) params.set('waypoints', waypoints.map(fmt).join(';'));
     return getJson(`/api/route?${params.toString()}`);
   },
+  // 多方案（驾车按策略）+ 途径点直达对比
+  routePlans: ({ mode, origin, destination, waypoints = [], direct = false, strategies = [0, 2, 4] }) => {
+    const params = new URLSearchParams({
+      mode,
+      origin: fmt(origin),
+      destination: fmt(destination),
+      direct: direct ? '1' : '0',
+      strategies: strategies.join(','),
+    });
+    if (waypoints.length) params.set('waypoints', waypoints.map(fmt).join(';'));
+    return getJson(`/api/route/plans?${params.toString()}`);
+  },
 };

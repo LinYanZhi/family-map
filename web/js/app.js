@@ -6,6 +6,7 @@ import { MapView, geolocationMessage } from './map.js';
 import { createSearchPanel } from './search.js';
 import { createRoutePanel } from './route.js';
 import { createStylePanel } from './style.js';
+import { createNav } from './nav.js';
 
 const els = {
   map: document.getElementById('map'),
@@ -23,9 +24,18 @@ const els = {
   diag: document.getElementById('diag'),
   pickbar: document.getElementById('pickbar'),
   pickCancel: document.getElementById('pick-cancel'),
+  nav: document.getElementById('nav'),
+  navInstruction: document.getElementById('nav-instruction'),
+  navNext: document.getElementById('nav-next'),
+  navRemainingDistance: document.getElementById('nav-remaining-distance'),
+  navRemainingTime: document.getElementById('nav-remaining-time'),
+  navStep: document.getElementById('nav-step'),
+  navProgressBar: document.getElementById('nav-progress-bar'),
+  navVoice: document.getElementById('nav-voice'),
+  navExit: document.getElementById('nav-exit'),
 };
 
-const state = { mapView: null, sheet: null, active: null, panels: {}, pickResolve: null };
+const state = { mapView: null, sheet: null, active: null, panels: {}, nav: null, pickResolve: null };
 const reportedErrors = new Set();
 
 function setStatus(name) {
@@ -220,6 +230,14 @@ function startApp() {
     openSheet,
     closeSheet,
     pickPoint,
+    startNav: (payload) => {
+      closeSheet();
+      try {
+        state.nav.start(payload);
+      } catch (err) {
+        toast(err.message || '无法开始导航');
+      }
+    },
     setRoutePoint: (kind, point) => {
       state.panels.route.setPoint(kind, point);
       openSheet('route');
@@ -231,6 +249,24 @@ function startApp() {
     route: createRoutePanel(ctx),
     style: createStylePanel(ctx),
   };
+
+  state.nav = createNav({
+    mapView: state.mapView,
+    els: {
+      nav: els.nav,
+      navInstruction: els.navInstruction,
+      navNext: els.navNext,
+      navRemainingDistance: els.navRemainingDistance,
+      navRemainingTime: els.navRemainingTime,
+      navStep: els.navStep,
+      navProgressBar: els.navProgressBar,
+      navVoice: els.navVoice,
+      navExit: els.navExit,
+    },
+    onExit: () => {
+      if (state.panels.route) openSheet('route');
+    },
+  });
 
   state.mapView.onMapClick(() => {
     if (state.sheet.isOpen) state.sheet.close();
@@ -267,7 +303,16 @@ function startApp() {
 
   setupKeyboardInset();
 
-  window.__app = { state, api, panels: state.panels, mapView: state.mapView, openSheet, closeSheet };
+  window.__app = {
+    state,
+    api,
+    panels: state.panels,
+    nav: state.nav,
+    mapView: state.mapView,
+    openSheet,
+    closeSheet,
+  };
+  window.__nav = state.nav;
   setStatus('ok');
   toast('地图已加载（白云区）：底部可搜索地点 / 规划路线 / 切换样式', 5000);
 }

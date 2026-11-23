@@ -43,7 +43,9 @@ export class MapView {
     this.pendingPick = null;
     this.mapClickHandlers = new Set();
     this.routeMarkers = [];
+    this.routeLines = [];
     this.routeLine = null;
+    this.directLine = null;
     this.searchMarker = null;
     this.locationMarker = null;
     this.locationCircle = null;
@@ -177,32 +179,85 @@ export class MapView {
     return { name: '我的位置', location: lnglat };
   }
 
-  setRoute({ origin, destination, waypoints = [], polyline = [] }) {
+  // 按途径点最近顶点把整条折线切成若干段，用于分段着色
+  _splitByWaypoints(polyline, waypoints) {
+    if (!waypoints.length || polyline.length < 3) return [polyline];
+    const indices = waypoints
+      .map((waypoint) => {
+        let best = -1;
+        let bestDistance = Infinity;
+        polyline.forEach((point, index) => {
+          const dx = point[0] - waypoint[0];
+          const dy = point[1] - waypoint[1];
+          const distance = dx * dx + dy * dy;
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = index;
+          }
+        });
+        return best;
+      })
+      .filter((index) => index > 0 && index < polyline.length - 1)
+      .sort((a, b) => a - b);
+    const unique = [...new Set(indices)];
+    if (!unique.length) return [polyline];
+
+    const segments = [];
+    let start = 0;
+    for (const index of unique) {
+      segments.push(polyline.slice(start, index + 1));
+      start = index;
+    }
+    segments.push(polyline.slice(start));
+    return segments.filter((segment) => segment.length > 1);
+  }
+
+  setRoute({ origin, destination, waypoints = [], polyline = [], directPolyline = null }) {
     this.clearRoute();
     this.clearSearchMarker();
 
     const markers = [];
     if (origin) markers.push(this._pin(origin, '起', 'origin'));
-    waypoints.forEach((point, index) => markers.push(this._pin(point, `途${index + 1}`, 'waypoint')));
+    waypoints.forEach((point, index) => markers.push(this._pin(point, String(index + 1), 'waypoint')));
     if (destination) markers.push(this._pin(destination, '终', 'destination'));
     if (markers.length) {
       this.map.add(markers);
       this.routeMarkers = markers;
     }
 
-    if (polyline.length > 1) {
-      this.routeLine = new this.AMap.Polyline({
-        path: polyline,
-        strokeColor: '#4c9aff',
+    const palette = ['#4c9aff', '#35d07f', '#ffb347', '#ff6b6b', '#b37cff'];
+    const segments = this._splitByWaypoints(polyline, waypoints);
+    this.routeLines = [];
+    segments.forEach((segment, index) => {
+      if (segment.length < 2) return;
+      const line = new this.AMap.Polyline({
+        path: segment,
+        strokeColor: palette[index % palette.length],
         strokeWeight: 6,
         strokeOpacity: 0.92,
         lineJoin: 'round',
         showDir: true,
       });
-      this.map.add(this.routeLine);
+      this.map.add(line);
+      this.routeLines.push(line);
+    });
+    this.routeLine = this.routeLines[0] || null;
+
+    if (directPolyline && directPolyline.length > 1) {
+      this.directLine = new this.AMap.Polyline({
+        path: directPolyline,
+        strokeColor: '#c3d1e0',
+        strokeWeight: 4,
+        strokeOpacity: 0.85,
+        strokeStyle: 'dashed',
+        strokeDasharray: [8, 8],
+        lineJoin: 'round',
+        zIndex: 60,
+      });
+      this.map.add(this.directLine);
     }
 
-    const overlays = [...markers, this.routeLine].filter(Boolean);
+    const overlays = [...markers, ...this.routeLines, this.directLine].filter(Boolean);
     if (overlays.length) this.map.setFitView(overlays, false, [90, 40, 260, 40]);
   }
 
@@ -211,9 +266,16 @@ export class MapView {
       this.map.remove(this.routeMarkers);
       this.routeMarkers = [];
     }
-    if (this.routeLine) {
-      this.map.remove(this.routeLine);
-      this.routeLine = null;
+    for (const line of this.routeLines) this.map.remove(line);
+    this.routeLines = [];
+    this.routeLine = null;
+    if (this.directLine) {
+      this.map.remove(this.directLine);
+      this.directLine = null;
     }
+  }
+
+  follow(location, zoom = 17) {
+    this.map.setZoomAndCenter(zoom, location);
   }
 }
