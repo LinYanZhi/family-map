@@ -154,6 +154,15 @@ body {
   -webkit-backdrop-filter: blur(4px);
 }
 
+/* 关键：作者样式的 display:grid 会覆盖 hidden 属性，必须显式处理 */
+.overlay[hidden] {
+  display: none;
+}
+
+.toast[hidden] {
+  display: none;
+}
+
 .overlay-card {
   width: min(420px, 100%);
   padding: 24px;
