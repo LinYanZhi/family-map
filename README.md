@@ -42,11 +42,11 @@ map-app/
 2. 把面板给出的公网地址写进 `deploy/public-url.txt`，例如 `https://frp-leg.com:60835`。
 3. 手机 4G 打开该地址；自签证书会提示不安全，点「高级 → 继续访问」。
 
-隧道只做 TCP 转发，TLS 在 nginx（8801）终止，所以公网访问必须是 `https://`。
+隧道只做 TCP 转发，TLS 在 nginx（8801）终止，所以公网访问必须是 `https://`；明文 HTTP 会被 Sakura 节点直接拒绝（501）。
 
 ## 证书
 
-`deploy/tls/server.crt` / `server.key` 由 `node server/gen-cert.mjs` 生成（SAN 含 `frp-leg.com`、`dx/yd/lt.frp-leg.com`、`localhost`、`127.0.0.1`、本机局域网 IP）。隧道域名不同时重建：
+`deploy/tls/server.crt` / `server.key` 由 `node server/gen-cert.mjs` 生成（SAN 含 `frp-leg.com` / `frp-pen.com` 及 dx/yd/lt 子域、`localhost`、`127.0.0.1`、本机局域网 IP）。隧道域名不同时重建：
 
 ```powershell
 node server\gen-cert.mjs --force

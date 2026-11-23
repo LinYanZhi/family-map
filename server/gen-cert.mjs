@@ -48,7 +48,11 @@ if (!openssl) {
   process.exit(1);
 }
 
-const dnsNames = ['frp-leg.com', 'dx.frp-leg.com', 'yd.frp-leg.com', 'lt.frp-leg.com', 'localhost'];
+const dnsNames = [
+  'frp-leg.com', 'dx.frp-leg.com', 'yd.frp-leg.com', 'lt.frp-leg.com',
+  'frp-pen.com', 'dx.frp-pen.com', 'yd.frp-pen.com', 'lt.frp-pen.com',
+  'localhost',
+];
 const extra = process.env.MAP_TLS_DNS ? process.env.MAP_TLS_DNS.split(',').map((s) => s.trim()).filter(Boolean) : [];
 const sans = [...dnsNames, ...extra].map((d) => `DNS:${d}`);
 sans.push('IP:127.0.0.1');
