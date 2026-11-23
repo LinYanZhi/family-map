@@ -1,11 +1,7 @@
 :root {
   color-scheme: dark;
   --bg: #0a1622;
-  --bg-soft: #0d2033;
-  --line: rgba(120, 180, 255, 0.18);
   --text: #e8f1fa;
-  --text-dim: #8fa6bd;
-  --text-faint: #64798f;
   --ok: #35d07f;
   --warn: #ffb347;
   --err: #ff5d5d;
@@ -13,129 +9,175 @@
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html,
 body {
   height: 100%;
   margin: 0;
-}
-
-body {
-  background: radial-gradient(120% 90% at 50% 0%, #12314d 0%, var(--bg) 62%);
+  overflow: hidden;
+  background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
-.stage {
-  position: relative;
-  min-height: 100vh;
-  min-height: 100dvh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding:
-    calc(env(safe-area-inset-top) + 24px)
-    calc(env(safe-area-inset-right) + 20px)
-    calc(env(safe-area-inset-bottom) + 24px)
-    calc(env(safe-area-inset-left) + 20px);
-  overflow: hidden;
+.map {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  background: #e9eef3;
 }
 
-.grid {
-  position: absolute;
-  inset: -25%;
-  background-image:
-    linear-gradient(rgba(86, 160, 220, 0.12) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(86, 160, 220, 0.12) 1px, transparent 1px);
-  background-size: 44px 44px;
-  transform: rotate(-8deg);
-  opacity: 0.5;
+.topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding:
+    calc(env(safe-area-inset-top) + 10px)
+    calc(env(safe-area-inset-right) + 16px)
+    14px
+    calc(env(safe-area-inset-left) + 16px);
+  background: linear-gradient(to bottom, rgba(10, 22, 34, 0.72), rgba(10, 22, 34, 0));
   pointer-events: none;
 }
 
-.card {
-  position: relative;
-  width: min(420px, 100%);
-  padding: 28px 24px 22px;
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background: rgba(13, 32, 51, 0.82);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid rgba(120, 180, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(13, 32, 51, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
-.eyebrow {
-  margin: 0 0 6px;
-  font-size: 12px;
-  letter-spacing: 0.14em;
-  color: var(--text-faint);
-}
-
-h1 {
+.brand h1 {
   margin: 0;
-  font-size: 26px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.06em;
 }
 
-.sub {
-  margin: 8px 0 0;
-  font-size: 14px;
-  color: var(--text-dim);
-}
-
-.checks {
-  display: grid;
-  gap: 10px;
-  margin: 20px 0;
-  padding: 0;
-  list-style: none;
-}
-
-.checks li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  color: #c7d6e6;
-}
-
-.dot {
-  flex: none;
+.status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #55637a;
-  box-shadow: 0 0 0 3px rgba(85, 99, 122, 0.18);
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(255, 179, 71, 0.18);
+  transition: background 0.2s ease;
 }
 
-.dot.ok {
+.status-dot.ok {
   background: var(--ok);
   box-shadow: 0 0 0 3px rgba(53, 208, 127, 0.18);
 }
 
-.dot.warn {
-  background: var(--warn);
-  box-shadow: 0 0 0 3px rgba(255, 179, 71, 0.18);
-}
-
-.dot.err {
+.status-dot.err {
   background: var(--err);
   box-shadow: 0 0 0 3px rgba(255, 93, 93, 0.18);
 }
 
-.hint {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--text-dim);
+.ver {
+  font-size: 11px;
+  color: rgba(232, 241, 250, 0.55);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
-button {
-  margin-top: 16px;
+.locate {
+  position: fixed;
+  right: calc(env(safe-area-inset-right) + 16px);
+  bottom: calc(env(safe-area-inset-bottom) + 24px);
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid rgba(120, 180, 255, 0.28);
+  border-radius: 50%;
+  background: rgba(13, 32, 51, 0.9);
+  color: #dbeaff;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.locate:active {
+  transform: scale(0.96);
+  background: rgba(30, 60, 90, 0.95);
+}
+
+.locate[disabled] {
+  opacity: 0.55;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 92px);
+  z-index: 20;
+  max-width: min(86vw, 420px);
+  padding: 10px 16px;
+  border: 1px solid rgba(120, 180, 255, 0.22);
+  border-radius: 12px;
+  background: rgba(13, 32, 51, 0.92);
+  color: #dbeaff;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  transform: translateX(-50%);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(6, 14, 22, 0.72);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.overlay-card {
+  width: min(420px, 100%);
+  padding: 24px;
+  border: 1px solid rgba(120, 180, 255, 0.18);
+  border-radius: 18px;
+  background: rgba(13, 32, 51, 0.94);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+.overlay-card h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.overlay-card p {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #8fa6bd;
+  word-break: break-word;
+}
+
+.overlay-card button {
   padding: 10px 18px;
   border: 1px solid rgba(120, 180, 255, 0.35);
   border-radius: 10px;
@@ -146,21 +188,8 @@ button {
   cursor: pointer;
 }
 
-button:active {
-  background: rgba(120, 180, 255, 0.22);
-}
-
-.meta {
-  display: flex;
-  gap: 8px;
-  margin: 18px 0 0;
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  * {
-    transition: none !important;
-    animation: none !important;
-  }
+/* 高德自带控件：底部缩放条与定位按钮位置微调（避免挡住安全区） */
+.amap-scalecontrol {
+  left: calc(env(safe-area-inset-left) + 12px) !important;
+  bottom: calc(env(safe-area-inset-bottom) + 16px) !important;
 }

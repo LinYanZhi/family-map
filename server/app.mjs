@@ -9,6 +9,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB_ROOT = path.join(ROOT, 'web');
 const DATA_DIR = path.join(ROOT, 'data');
 const PID_FILE = path.join(DATA_DIR, 'app.pid');
+const SECRETS_FILE = path.join(ROOT, 'deploy', 'secrets.local.json');
 const HOST = process.env.MAP_HOST || '127.0.0.1';
 const PORT = Number(process.env.MAP_PORT || 8802);
 const SERVICE = 'map-app';
@@ -54,6 +55,18 @@ function healthPayload() {
     uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000),
     now: new Date().toISOString(),
   };
+}
+
+// 前端只需要 JS API key 与安全密钥；Web 服务 key 永远不下发
+function readAmapConfig() {
+  try {
+    const secrets = JSON.parse(fs.readFileSync(SECRETS_FILE, 'utf8'));
+    const amap = secrets?.amap || {};
+    if (!amap.jsKey || !amap.securityJsCode) return null;
+    return { jsKey: amap.jsKey, securityJsCode: amap.securityJsCode };
+  } catch {
+    return null;
+  }
 }
 
 // 把 URL 路径映射到 web/ 内部；越界路径返回 null（防目录穿越）
@@ -117,6 +130,19 @@ const server = http.createServer((req, res) => {
         return;
       }
       return json(res, 200, healthPayload());
+    }
+
+    if (pathname === '/api/config') {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+      const amap = readAmapConfig();
+      if (!amap) return json(res, 503, { ok: false, error: 'amap_not_configured' });
+      const payload = { ok: true, version: VERSION, amap };
+      if (req.method === 'HEAD') {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
+      return json(res, 200, payload);
     }
 
     if (pathname.startsWith('/api/')) return json(res, 404, { ok: false, error: 'not_found', path: pathname });

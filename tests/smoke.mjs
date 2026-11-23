@@ -56,6 +56,14 @@ let api404Json = null;
 try { api404Json = JSON.parse(api404.body); } catch { /* ignore */ }
 check('未知 API 返回 404 JSON', api404.status === 404 && api404Json?.ok === false, `status=${api404.status}`);
 
+const cfg = await request(HTTP_BASE, '/api/config');
+let cfgJson = null;
+try { cfgJson = JSON.parse(cfg.body); } catch { /* ignore */ }
+check('config 200', cfg.status === 200, `status=${cfg.status}${cfgJson?.error ? ` error=${cfgJson.error}` : ''}`);
+check('config 下发 JS key', typeof cfgJson?.amap?.jsKey === 'string' && cfgJson.amap.jsKey.length > 10);
+check('config 下发安全密钥', typeof cfgJson?.amap?.securityJsCode === 'string' && cfgJson.amap.securityJsCode.length > 10);
+check('config 不含 Web 服务 key 字段', !('webServiceKey' in (cfgJson?.amap || {})));
+
 const page404 = await request(HTTP_BASE, '/no-such-page.html');
 check('未知页面 404', page404.status === 404, `status=${page404.status}`);
 
