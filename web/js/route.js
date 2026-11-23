@@ -122,6 +122,7 @@ export function createRoutePanel(ctx) {
                 role="switch" aria-checked="${state.useWaypoints}" aria-label="使用途径点"><span class="knob"></span></button>
       </div>
       ${showWaypoints && state.mode !== 'driving' ? '<p class="panel-hint">步行/骑行暂不支持途径点，将按直达路线规划</p>' : ''}
+      ${state.origin && !state.destination ? '<p class="panel-hint">下一步：点「终」选择终点，或直接搜索第二个地点</p>' : ''}
       <button type="button" class="primary-btn" data-action="plan" ${state.loading ? 'disabled' : ''}>
         ${state.loading ? '规划中…' : (state.plans.length ? '重新规划' : '规划路线')}
       </button>
@@ -222,6 +223,7 @@ export function createRoutePanel(ctx) {
     }
     const useWaypoints = state.useWaypoints && state.mode === 'driving';
     const waypoints = useWaypoints ? state.waypoints.filter(Boolean) : [];
+    ctx.trace?.('plan:start', { mode: state.mode, waypoints: waypoints.length });
 
     state.loading = true;
     state.error = '';
@@ -243,18 +245,22 @@ export function createRoutePanel(ctx) {
       state.activePlan = 0;
       drawActive();
       justPlanned = true;
+      ctx.trace?.('plan:done', { plans: state.plans.length, direct: Boolean(state.direct) });
       const first = state.plans[0];
       toast(`已规划 ${state.plans.length} 条方案：${distanceText(first.distance)} · ${durationText(first.duration)}`);
     } catch (err) {
       state.error = err.message;
+      ctx.trace?.('plan:failed', { message: err.message });
     }
     state.loading = false;
     render(bodyEl);
   }
 
-  async function choosePoint(kind, index) {
+  async function choosePoint(kind, index, preferredMethod = null) {
     const label = kind === 'origin' ? '出发点' : kind === 'destination' ? '终点' : '途径点';
-    const point = await ctx.pickPoint(label);
+    ctx.trace?.('point:chooseStart', { kind, index, preferredMethod });
+    const point = await ctx.pickPoint(label, preferredMethod);
+    ctx.trace?.('point:chooseDone', { kind, index, name: point?.name || null });
     if (!point) {
       ctx.openSheet('route');
       return;
@@ -268,10 +274,19 @@ export function createRoutePanel(ctx) {
     }
     clearPlan();
     ctx.openSheet('route');
+
+    // 连续选点：刚设好起点且还没终点时，自动用同样的方式继续选终点
+    if (kind === 'origin' && !state.destination && point.__method) {
+      const method = point.__method === 'locate' ? 'search' : point.__method;
+      setTimeout(() => {
+        if (!state.destination) choosePoint('destination', -1, method);
+      }, 260);
+    }
   }
 
   function setPoint(kind, point) {
     if (!point) return;
+    ctx.trace?.('point:set', { kind, name: point.name || null });
     if (kind === 'origin') state.origin = point;
     else if (kind === 'destination') state.destination = point;
     else {

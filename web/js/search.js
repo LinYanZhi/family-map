@@ -1,5 +1,5 @@
 // @generated
-// 搜索面板：关键词搜索（后端代理高德 POI）、常用/最近地点、结果可直接设为起/终点
+// 搜索面板：普通搜索（可设起/终点） + 专用选点模式（点任意结果行=选中，带取消）
 import { api } from './api.js';
 import { escapeHtml, toast } from './ui.js';
 
@@ -22,6 +22,12 @@ function pushRecent(word) {
   } catch { /* ignore */ }
 }
 
+function blurActive() {
+  try {
+    if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();
+  } catch { /* ignore */ }
+}
+
 export function createSearchPanel(ctx) {
   let keyword = '';
   let results = [];
@@ -31,12 +37,12 @@ export function createSearchPanel(ctx) {
   let bodyEl = null;
 
   function chipList() {
-    const recent = readRecent();
-    return [...new Set([...QUICK, ...recent])].slice(0, 8);
+    return [...new Set([...QUICK, ...readRecent()])].slice(0, 8);
   }
 
   function render(body) {
     bodyEl = body;
+    const picker = Boolean(pick);
     body.innerHTML = `
       <form class="search-form">
         <input class="search-input" type="search" placeholder="搜索地点，如：白云万达广场"
@@ -46,14 +52,11 @@ export function createSearchPanel(ctx) {
       <div class="chips">
         ${chipList().map((word) => `<button type="button" class="chip" data-word="${escapeHtml(word)}">${escapeHtml(word)}</button>`).join('')}
       </div>
-      <p class="panel-hint" data-hint ${pick ? '' : 'hidden'}></p>
+      <p class="panel-hint" data-hint ${picker ? '' : 'hidden'}>${picker ? `点下方结果确认${pick.label}` : ''}</p>
       <div class="results"></div>
     `;
 
     const input = body.querySelector('.search-input');
-    const hint = body.querySelector('[data-hint]');
-    if (pick) hint.textContent = `正在为「${pick.label}」选择地点，点下方结果确认`;
-
     body.querySelector('.search-form').addEventListener('submit', (event) => {
       event.preventDefault();
       run(input.value);
@@ -71,7 +74,7 @@ export function createSearchPanel(ctx) {
     requestAnimationFrame(() => {
       try {
         input.focus({ preventScroll: true });
-        input.select(); // 再次打开搜索时全选旧关键词，直接输入即替换
+        input.select();
       } catch { /* ignore */ }
     });
   }
@@ -95,16 +98,20 @@ export function createSearchPanel(ctx) {
       box.innerHTML = '<p class="empty">输入关键词，或点上面的常用地点</p>';
       return;
     }
+
+    const picker = Boolean(pick);
     box.innerHTML = results.map((poi, index) => `
-      <div class="result" data-index="${index}">
+      <div class="result ${picker ? 'result-pick' : ''}" data-index="${index}">
         <button type="button" class="result-main" data-action="locate">
           <span class="result-name">${escapeHtml(poi.name)}</span>
           <span class="result-meta">${escapeHtml([poi.adname, poi.address].filter(Boolean).join(' · '))}</span>
         </button>
-        <span class="result-actions">
-          <button type="button" class="mini-btn" data-action="origin">起</button>
-          <button type="button" class="mini-btn" data-action="destination">终</button>
-        </span>
+        ${picker
+          ? '<span class="pick-arrow" aria-hidden="true">选择 ›</span>'
+          : `<span class="result-actions">
+               <button type="button" class="mini-btn" data-action="origin">起</button>
+               <button type="button" class="mini-btn" data-action="destination">终</button>
+             </span>`}
       </div>`).join('');
   }
 
@@ -130,43 +137,45 @@ export function createSearchPanel(ctx) {
     renderResults();
   }
 
+  function resolvePick(poi) {
+    if (!pick) return;
+    const current = pick;
+    pick = null;
+    blurActive();
+    ctx.closeSheet();
+    current.resolve({ name: poi.name, location: poi.location });
+  }
+
   function onResultsClick(event) {
-    const button = event.target.closest('[data-action]');
-    if (!button) return;
-    const row = button.closest('[data-index]');
+    const row = event.target.closest('.result');
     if (!row) return;
     const poi = results[Number(row.dataset.index)];
     if (!poi) return;
-    const action = button.dataset.action;
 
+    // 选点模式：点这一行的任何位置都算选中（不区分按钮/文字，避免误触）
+    if (pick) {
+      resolvePick(poi);
+      return;
+    }
+
+    const button = event.target.closest('[data-action]');
+    if (!button) return;
+    const action = button.dataset.action;
     if (action === 'locate') {
-      if (pick) {
-        const current = pick;
-        pick = null;
-        ctx.closeSheet();
-        current.resolve({ name: poi.name, location: poi.location });
-        return;
-      }
       ctx.mapView.setSearchMarker(poi.location);
       ctx.mapView.focus(poi.location, 16);
       toast(`已定位：${poi.name}`);
       return;
     }
-
-    ctx.setRoutePoint(action, { name: poi.name, location: poi.location });
+    if (action === 'origin' || action === 'destination') {
+      ctx.setRoutePoint(action, { name: poi.name, location: poi.location });
+    }
   }
 
   function pickPoint(label) {
     return new Promise((resolve) => {
       pick = { label, resolve };
       ctx.openSheet('search');
-      if (bodyEl) {
-        const hint = bodyEl.querySelector('[data-hint]');
-        if (hint) {
-          hint.hidden = false;
-          hint.textContent = `正在为「${label}」选择地点，点下方结果确认`;
-        }
-      }
     });
   }
 
@@ -174,8 +183,9 @@ export function createSearchPanel(ctx) {
     if (!pick) return;
     const current = pick;
     pick = null;
+    blurActive();
     current.resolve(null);
   }
 
-  return { render, pickPoint, cancelPick, run, getResults: () => results };
+  return { render, pickPoint, cancelPick, run, getResults: () => results, isPicking: () => Boolean(pick) };
 }

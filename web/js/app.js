@@ -69,6 +69,11 @@ function reportUncaught(code, message, detail) {
   reportError(code, message, detail);
 }
 
+// 关键交互埋点（用户报 bug 时可从 data/client-errors.log 还原卡在哪一步）
+function trace(message, detail) {
+  reportError('ui', message, detail);
+}
+
 function showError(code, message, detail) {
   setStatus('err');
   els.overlayTitle.textContent = '地图加载失败';
@@ -135,6 +140,7 @@ function setupKeyboardInset() {
 
 function openSheet(kind) {
   const titles = { search: '搜索地点', route: '路线规划', style: '地图样式' };
+  trace('sheet:open', { kind });
   state.active = kind;
   state.sheet.open(titles[kind]);
   document.querySelectorAll('.tab').forEach((tab) => {
@@ -161,19 +167,23 @@ function cancelPickFlow() {
   }
 }
 
-async function pickPoint(label) {
-  const choice = await actionMenu(`选择${label}`, [
+// forcedChoice 用于「连续选点」：跳过操作菜单直接用上一步选过的方式
+async function pickPoint(label, forcedChoice = null) {
+  trace('pick:start', { label, forced: forcedChoice });
+  const choice = forcedChoice || await actionMenu(`选择${label}`, [
     { id: 'locate', label: '使用我的位置' },
     { id: 'search', label: '搜索地点' },
     { id: 'map', label: '在地图上选点' },
   ]);
+  trace('pick:choice', { label, choice });
   if (!choice) return null;
 
   if (choice === 'locate') {
     try {
       const point = await state.mapView.locate();
+      trace('pick:resolved', { label, by: 'locate' });
       toast('已使用当前位置');
-      return point;
+      return { ...point, __method: 'locate' };
     } catch (err) {
       toast(geolocationMessage(err));
       return null;
@@ -182,7 +192,9 @@ async function pickPoint(label) {
 
   if (choice === 'search') {
     state.sheet.close();
-    return state.panels.search.pickPoint(label);
+    const point = await state.panels.search.pickPoint(label);
+    trace('pick:resolved', { label, by: 'search', name: point?.name || null });
+    return point ? { ...point, __method: 'search' } : null;
   }
 
   if (choice === 'map') {
@@ -199,9 +211,11 @@ async function pickPoint(label) {
     if (!lnglat) return null;
     try {
       const data = await api.regeo(lnglat);
-      return { name: data.address || '地图选点', location: lnglat };
+      trace('pick:resolved', { label, by: 'map', name: data.address || '' });
+      return { name: data.address || '地图选点', location: lnglat, __method: 'map' };
     } catch {
-      return { name: '地图选点', location: lnglat };
+      trace('pick:resolved', { label, by: 'map', name: '地图选点' });
+      return { name: '地图选点', location: lnglat, __method: 'map' };
     }
   }
 
@@ -231,6 +245,7 @@ function startApp() {
     closeSheet,
     pickPoint,
     startNav: (payload) => {
+      trace('nav:start', { distance: payload?.plan?.distance ?? null });
       closeSheet();
       try {
         state.nav.start(payload);
@@ -239,9 +254,13 @@ function startApp() {
       }
     },
     setRoutePoint: (kind, point) => {
+      trace('route:setPoint', { kind, name: point?.name || null });
+      // 兜底：若还有未完成的选点流程，先收掉，避免状态悬挂
+      state.panels.search.cancelPick();
       state.panels.route.setPoint(kind, point);
       openSheet('route');
     },
+    trace,
   };
 
   state.panels = {

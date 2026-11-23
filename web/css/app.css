@@ -403,6 +403,22 @@ body.sheet-open .fab {
   gap: 6px;
 }
 
+/* 选点模式：整行可点，右侧显示「选择」箭头 */
+.result-pick {
+  border-color: rgba(76, 154, 255, 0.45);
+  background: rgba(76, 154, 255, 0.08);
+}
+
+.result-pick .result-main {
+  cursor: pointer;
+}
+
+.pick-arrow {
+  flex: none;
+  color: #8fb8ff;
+  font-size: 12px;
+}
+
 .mini-btn {
   width: 34px;
   height: 34px;
