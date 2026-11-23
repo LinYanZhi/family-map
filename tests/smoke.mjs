@@ -73,6 +73,24 @@ const clientLog = await request(HTTP_BASE, '/api/client-log', {
 });
 check('client-log 接受上报', clientLog.status === 200 && JSON.parse(clientLog.body)?.ok === true, `status=${clientLog.status}`);
 
+const poiNoKeywords = await request(HTTP_BASE, '/api/poi');
+check('poi 缺关键词返回 400', poiNoKeywords.status === 400, `status=${poiNoKeywords.status}`);
+
+const regeoBad = await request(HTTP_BASE, '/api/regeo?location=abc');
+check('regeo 非法坐标返回 400', regeoBad.status === 400, `status=${regeoBad.status}`);
+
+const routeBad = await request(HTTP_BASE, '/api/route?mode=driving&origin=x&destination=y');
+check('route 非法坐标返回 400', routeBad.status === 400, `status=${routeBad.status}`);
+
+const routeBadWp = await request(HTTP_BASE, '/api/route?mode=driving&origin=113.2,23.1&destination=113.3,23.2&waypoints=bad');
+check('route 非法途径点返回 400', routeBadWp.status === 400, `status=${routeBadWp.status}`);
+
+const mapModule = await request(HTTP_BASE, '/js/map.js');
+check('模块 js/map.js 可加载', mapModule.status === 200 && mapModule.body.includes('MAP_STYLES'), `status=${mapModule.status}`);
+
+const routeModule = await request(HTTP_BASE, '/js/route.js');
+check('模块 js/route.js 可加载', routeModule.status === 200 && routeModule.body.includes('createRoutePanel'), `status=${routeModule.status}`);
+
 const page404 = await request(HTTP_BASE, '/no-such-page.html');
 check('未知页面 404', page404.status === 404, `status=${page404.status}`);
 

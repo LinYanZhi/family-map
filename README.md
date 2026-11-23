@@ -2,21 +2,35 @@
 
 自用轻量地图 Web 应用：手机浏览器访问，最多 2 人，广州白云 / 番禺为主。原生 HTML/CSS/JS，零构建、零依赖。
 
-当前进度：**阶段 2**（高德 JS API + 定位 + 中心/缩放；阶段 1 链路已验收）。
+当前进度：**阶段 3/4 提前完成** —— 地图 + 定位 + POI 搜索 + 路线规划（起终点/途径点）+ 4 种地图样式（默认暗黑）+ 手机端底部面板。
 
 ## 目录
 
 ```text
 map-app/
-  server/            零依赖 Node 服务（静态托管 + /api/health /api/config /api/client-log，阶段 3 起挂高德 Web 服务代理）
-  web/               前端（原生 HTML/CSS/JS）
-  data/              运行态与本机用户数据（pid、收藏点等，不进 git）
+  server/
+    app.mjs            零依赖 HTTP 服务：静态托管 + /api/health /api/config /api/client-log
+    amap.mjs           高德 Web 服务代理：POI / 逆地理 / 路径规划（5 分钟缓存 + 限流）
+  web/
+    index.html         页面骨架（地图 + 底部 Tab + 底部面板）
+    css/app.css        移动优先样式（底部面板 / 安全区 / 暗色 UI）
+    js/app.js          启动装配：加载 JS API、面板/Tab、定位、错误诊断
+    js/map.js          地图视图：样式切换、标记、折线、定位
+    js/search.js       搜索面板
+    js/route.js        路线面板（起终点 + 途径点 + 开关 + 结果步骤）
+    js/style.js        地图样式面板
+    js/api.js          前端 API 封装
+    js/ui.js           toast / 底部面板 / 操作菜单
+  data/                运行态与本机用户数据（pid、错误日志，不进 git）
   deploy/
-    nginx/           nginx 实例（conf/map.conf；nginx.exe 与 logs/temp 不进 git）
-    tls/             自签证书（不进 git）
-    public-url.txt   公网入口地址（配置隧道后写入，可选）
-  start.cmd          启动 link（Node + nginx）
-  stop.cmd           停止
+    nginx/             nginx 实例（conf/map.conf；nginx.exe 与 logs/temp 不进 git）
+    tls/               自签证书（不进 git）
+    public-url.txt     公网入口地址（配置隧道后写入，可选）
+  tests/
+    smoke.mjs          离线契约测试（不消耗高德配额）
+    live.mjs           真实高德接口测试（会消耗少量配额）
+  start.cmd            启动 link（Node + nginx）
+  stop.cmd             停止
 ```
 
 ## 端口
@@ -54,7 +68,7 @@ node server\gen-cert.mjs --force
 
 正式使用建议换免费证书：直接把证书与私钥覆盖到这两个文件即可，重启生效。
 
-## 高德 key 放哪里（阶段 2）
+## 高德 key 放哪里
 
 三个 key（JS API key、安全密钥、Web 服务 key）一律写本机 `deploy/secrets.local.json`（已在 `.gitignore`），**不进 git、不写进代码**。`GET /api/config` 只下发前端需要的 `jsKey` 与 `securityJsCode`，Web 服务 key 只留在服务端（阶段 3 的 `/api/*` 代理使用）。
 
@@ -67,18 +81,38 @@ node server\gen-cert.mjs --force
 
 > 安全密钥（securityJsCode）与 JS key 配套下发属高德 2.0 设计（前端必然可见）；Web 服务 key 绝不出现在前端响应里。如果以后 key 泄露，到控制台重置即可。
 
-## 地图页（阶段 2）
+## 功能与接口（0.3）
+
+**页面功能**
 
 - 默认中心：**白云区政府**（`113.272674, 23.156789`），zoom 13；拖动 / 双指缩放 / 滚轮缩放。
+- 底部 3 个 Tab：**搜索 / 路线 / 样式**，面板从底部弹出，手机单手可操作。
+- **搜索**：关键词 + 常用地点快捷词；结果可「定位」，也可直接点「起 / 终」设为路线起终点。
+- **路线**：驾车 / 步行 / 骑行；起终点支持「我的位置 / 搜索地点 / 地图选点」；**途径点最多 3 个**，有「使用途径点」开关（关掉即按起终点直达，途径点保留但不参与）；结果给距离、预计用时、逐步指引，并在地图上画折线 + 起/途/终标记。步行/骑行暂不支持途径点（会自动忽略并提示）。
+- **样式**：暗黑（默认）/ 标准 / 浅色 / 灰白，选择写入 localStorage；暗黑适合夜间/车内。
 - 右下角定位按钮：浏览器 Geolocation，蓝点 + 精度圈；HTTPS 下才允许（iOS 限制）。
-- 加载失败时显示错误码遮罩（`[config]` / `[script]` / `[init]` / `[js]`），**自动上报到 `data/client-errors.log`**（不进 git），重试按钮 = 刷新页面。高德脚本首次失败会自动再试一次。
-- 自测可读页面状态：`window.__map.getCenter()` / `getZoom()`（CDP 断言用）。
+- 加载失败显示错误码遮罩（`[config]` / `[script]` / `[init]` / `[js]`）并自动上报 `data/client-errors.log`；高德脚本首次失败自动重试。
+
+**后端接口（key 只在服务端）**
+
+| 接口 | 参数 | 说明 |
+|---|---|---|
+| `GET /api/poi` | `keywords`、`city`（默认广州） | POI 搜索，返回名称/地址/区/坐标 |
+| `GET /api/regeo` | `location=lng,lat` | 逆地理编码，地图选点取名用 |
+| `GET /api/route` | `mode=driving\|walking\|riding`、`origin`、`destination`、`waypoints`（`;` 分隔，仅驾车） | 距离/时长/步骤/折线 |
+
+服务端对高德请求做 **5 分钟缓存**（同参数复用）+ **每分钟 90 次**限流，保护个人免费额度；超限返回 `429 amap_rate_limited`。
+
+自测可通过 `window.__app` 读取面板/地图状态（CDP 断言用）：`__app.mapView.getStyle()`、`__app.panels.search.getResults()`、`__app.panels.route.getState()`。
 
 ## 自测
 
 ```powershell
-node tests\smoke.mjs    # 19 项契约检查：页面/health/配置/上报/HTTPS/404/HEAD/缓存头
+node tests\smoke.mjs    # 25 项离线契约检查（不消耗高德配额）
+node tests\live.mjs     # 7 项真实高德接口检查（POI/逆地理/驾车/途径点/步行，会消耗少量配额）
 ```
+
+`smoke.mjs` 覆盖：页面/health/config/上报/各接口参数校验/模块加载/HTTPS/404/HEAD/缓存头。
 
 ## 排障
 
@@ -89,4 +123,5 @@ node tests\smoke.mjs    # 19 项契约检查：页面/health/配置/上报/HTTPS
 | 手机局域网打不开 | Windows 防火墙会给新的 `nginx.exe` 自动建 **Block** 规则；管理员运行 `deploy/allow-lan.cmd` 一次性放行。公网隧道走 127.0.0.1，不受影响 |
 | 公网打不开 | 地址必须是 `https://`；确认 Sakura 隧道在线、`deploy/public-url.txt` 与面板端口一致 |
 | 地图页显示「地图加载失败」 | 看遮罩里的错误码 + `data/client-errors.log`（含设备 UA/时间/错误明细）；`[script]` = 高德 JS API 请求失败（网络/拦截），`[config]` = 服务端 key 未配置 |
-| 改了前端还是旧界面 | 静态资源带 `?v=` 版本串，改完递增；nginx/Node 对 html/js/css 均已禁用缓存 |
+| 搜索/路线报错 | 页面会显示高德返回的原因；`429` = 本机限流（每分钟 90 次），等一分钟；`amap_api_error` = 高德侧参数/额度问题，看 message 里的 info |
+| 改了前端还是旧界面 | 静态资源带 `?v=` 版本串，改完递增；nginx/Node 对 html/js/css 均已禁用缓存；手机 Safari 还需关标签重开 |

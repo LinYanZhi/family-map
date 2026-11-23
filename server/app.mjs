@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createAmapClient, AmapError } from './amap.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB_ROOT = path.join(ROOT, 'web');
@@ -18,6 +19,13 @@ const SERVICE = 'map-app';
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const VERSION = pkg.version || '0.0.0';
 const STARTED_AT = Date.now();
+const amapClient = createAmapClient({ secretsFile: SECRETS_FILE });
+const LOCATION_RE = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
+
+function sendAmapError(res, err) {
+  if (err instanceof AmapError) return json(res, err.status, { ok: false, error: err.code, message: err.message });
+  return json(res, 502, { ok: false, error: 'amap_error', message: err?.message || '高德请求失败' });
+}
 
 const MIME = new Map([
   ['.html', 'text/html; charset=utf-8'],
@@ -166,6 +174,52 @@ async function handleRequest(req, res) {
         return;
       }
       return json(res, 200, payload);
+    }
+
+    // 高德 Web 服务代理：POI 搜索 / 逆地理编码 / 路径规划（key 只在服务端）
+    if (pathname === '/api/poi') {
+      if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+      const keywords = (url.searchParams.get('keywords') || '').trim();
+      if (!keywords) return json(res, 400, { ok: false, error: 'missing_keywords' });
+      if (keywords.length > 80) return json(res, 400, { ok: false, error: 'keywords_too_long' });
+      try {
+        const pois = await amapClient.searchPoi({ keywords, city: url.searchParams.get('city') || '广州' });
+        return json(res, 200, { ok: true, count: pois.length, pois });
+      } catch (err) {
+        return sendAmapError(res, err);
+      }
+    }
+
+    if (pathname === '/api/regeo') {
+      if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+      const location = url.searchParams.get('location') || '';
+      if (!LOCATION_RE.test(location)) return json(res, 400, { ok: false, error: 'bad_location' });
+      try {
+        return json(res, 200, { ok: true, ...(await amapClient.regeo({ location })) });
+      } catch (err) {
+        return sendAmapError(res, err);
+      }
+    }
+
+    if (pathname === '/api/route') {
+      if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+      const mode = url.searchParams.get('mode') || 'driving';
+      const origin = url.searchParams.get('origin') || '';
+      const destination = url.searchParams.get('destination') || '';
+      const rawWaypoints = url.searchParams.get('waypoints') || '';
+      const waypoints = rawWaypoints ? rawWaypoints.split(';').filter(Boolean) : [];
+      if (!LOCATION_RE.test(origin) || !LOCATION_RE.test(destination)) {
+        return json(res, 400, { ok: false, error: 'bad_point' });
+      }
+      if (waypoints.length > 3 || waypoints.some((w) => !LOCATION_RE.test(w))) {
+        return json(res, 400, { ok: false, error: 'bad_waypoints' });
+      }
+      try {
+        const result = await amapClient.route({ mode, origin, destination, waypoints: waypoints.join(';') });
+        return json(res, 200, { ok: true, ...result });
+      } catch (err) {
+        return sendAmapError(res, err);
+      }
     }
 
     // 前端加载/初始化失败上报：写到 data/client-errors.log，便于手机端问题不留白
