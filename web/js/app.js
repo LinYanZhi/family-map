@@ -1,7 +1,8 @@
 // @generated
 // 家庭地图 · 阶段 2：高德 JS API 2.0 渲染 + 浏览器定位 + 缩放/中心控制
-const DEFAULT_CENTER = [113.2644, 23.1291]; // 广州市中心（白云/番禺之间）
-const DEFAULT_ZOOM = 12;
+const DEFAULT_CENTER = [113.272674, 23.156789]; // 白云区政府（白云区中心）
+const DEFAULT_ZOOM = 13;
+
 const GEO_ERRORS = {
   1: '定位权限被拒绝（iPhone：设置 → Safari → 位置 → 允许）',
   2: '无法获取位置（检查系统定位服务是否开启）',
@@ -16,6 +17,7 @@ const els = {
   overlayTitle: document.getElementById('overlay-title'),
   overlayText: document.getElementById('overlay-text'),
   overlayRetry: document.getElementById('overlay-retry'),
+  diag: document.getElementById('diag'),
 };
 
 const state = {
@@ -39,10 +41,34 @@ function toast(message, ms = 4000) {
   state.toastTimer = setTimeout(() => { els.toast.hidden = true; }, ms);
 }
 
-function showOverlay(title, text) {
-  els.overlayTitle.textContent = title;
-  els.overlayText.textContent = text;
+// 失败上报到服务端 data/client-errors.log，手机端出问题不用靠用户抄报错
+function reportError(code, message, detail) {
+  try {
+    fetch('/api/client-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
+      body: JSON.stringify({
+        code,
+        message,
+        detail,
+        ua: navigator.userAgent,
+        href: location.href,
+        at: new Date().toISOString(),
+      }),
+    }).catch(() => {});
+  } catch { /* ignore */ }
+}
+
+function showError(code, message, detail) {
+  setStatus('err');
+  els.overlayTitle.textContent = '地图加载失败';
+  els.overlayText.textContent = `[${code}] ${message}`;
+  if (els.diag) {
+    els.diag.textContent = `${navigator.userAgent} · ${new Date().toLocaleString()}`;
+  }
   els.overlay.hidden = false;
+  reportError(code, message, detail);
 }
 
 function hideOverlay() {
@@ -61,7 +87,7 @@ async function fetchConfig() {
   return data.amap;
 }
 
-function loadAmap(amapCfg) {
+function loadAmapOnce(amapCfg) {
   return new Promise((resolve, reject) => {
     if (window.AMap) {
       resolve();
@@ -82,6 +108,21 @@ function loadAmap(amapCfg) {
     };
     document.head.appendChild(script);
   });
+}
+
+// 首次失败自动再试一次（瞬时断流/弱网时能自愈）
+async function loadAmap(amapCfg) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await loadAmapOnce(amapCfg);
+      return;
+    } catch (err) {
+      lastError = err;
+      if (attempt === 1) await new Promise((r) => setTimeout(r, 1200));
+    }
+  }
+  throw lastError || new Error('高德 JS API 加载失败');
 }
 
 function initMap() {
@@ -169,18 +210,38 @@ function locate() {
 async function boot() {
   hideOverlay();
   setStatus('loading');
+  let amapCfg;
   try {
-    const amapCfg = await fetchConfig();
+    amapCfg = await fetchConfig();
+  } catch (err) {
+    showError('config', err.message);
+    return;
+  }
+  try {
     await loadAmap(amapCfg);
+  } catch (err) {
+    showError('script', err.message, { online: navigator.onLine });
+    return;
+  }
+  try {
     initMap();
     setStatus('ok');
-    toast('地图已加载：拖动/双指缩放，点右下角定位', 4500);
+    toast('地图已加载（白云区）：拖动/双指缩放，点右下角定位', 4500);
   } catch (err) {
-    setStatus('err');
-    showOverlay('地图加载失败', `${err.message}。可点「重试」，或检查网络后刷新。`);
+    showError('init', err.message || '地图初始化异常');
   }
 }
 
+window.addEventListener('error', (event) => {
+  if (state.map) return;
+  reportError('js', event.message || 'uncaught error', { source: event.filename, line: event.lineno });
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  if (state.map) return;
+  reportError('promise', String(event.reason || 'unhandled rejection'));
+});
+
 els.locate.addEventListener('click', locate);
-els.overlayRetry.addEventListener('click', boot);
+els.overlayRetry.addEventListener('click', () => location.reload());
 boot();

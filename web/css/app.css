@@ -188,6 +188,19 @@ body {
   cursor: pointer;
 }
 
+.diag:empty {
+  display: none;
+}
+
+.diag {
+  margin: 14px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: #64798f;
+  word-break: break-all;
+}
+
 /* 高德自带控件：底部缩放条与定位按钮位置微调（避免挡住安全区） */
 .amap-scalecontrol {
   left: calc(env(safe-area-inset-left) + 12px) !important;

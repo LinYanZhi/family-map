@@ -8,7 +8,7 @@
 
 ```text
 map-app/
-  server/            零依赖 Node 服务（静态托管 + /api/health，阶段 2 起挂高德 Web 服务代理）
+  server/            零依赖 Node 服务（静态托管 + /api/health /api/config /api/client-log，阶段 3 起挂高德 Web 服务代理）
   web/               前端（原生 HTML/CSS/JS）
   data/              运行态与本机用户数据（pid、收藏点等，不进 git）
   deploy/
@@ -67,10 +67,17 @@ node server\gen-cert.mjs --force
 
 > 安全密钥（securityJsCode）与 JS key 配套下发属高德 2.0 设计（前端必然可见）；Web 服务 key 绝不出现在前端响应里。如果以后 key 泄露，到控制台重置即可。
 
+## 地图页（阶段 2）
+
+- 默认中心：**白云区政府**（`113.272674, 23.156789`），zoom 13；拖动 / 双指缩放 / 滚轮缩放。
+- 右下角定位按钮：浏览器 Geolocation，蓝点 + 精度圈；HTTPS 下才允许（iOS 限制）。
+- 加载失败时显示错误码遮罩（`[config]` / `[script]` / `[init]` / `[js]`），**自动上报到 `data/client-errors.log`**（不进 git），重试按钮 = 刷新页面。高德脚本首次失败会自动再试一次。
+- 自测可读页面状态：`window.__map.getCenter()` / `getZoom()`（CDP 断言用）。
+
 ## 自测
 
 ```powershell
-node tests\smoke.mjs    # 18 项契约检查：页面/health/配置/HTTPS/404/HEAD/缓存头
+node tests\smoke.mjs    # 19 项契约检查：页面/health/配置/上报/HTTPS/404/HEAD/缓存头
 ```
 
 ## 排障
@@ -81,4 +88,5 @@ node tests\smoke.mjs    # 18 项契约检查：页面/health/配置/HTTPS/404/HE
 | nginx 起不来 | `deploy/nginx/nginx.exe -t -p deploy/nginx/ -c conf/map.conf`，看 `deploy/nginx/logs/map-error.log` |
 | 手机局域网打不开 | Windows 防火墙会给新的 `nginx.exe` 自动建 **Block** 规则；管理员运行 `deploy/allow-lan.cmd` 一次性放行。公网隧道走 127.0.0.1，不受影响 |
 | 公网打不开 | 地址必须是 `https://`；确认 Sakura 隧道在线、`deploy/public-url.txt` 与面板端口一致 |
+| 地图页显示「地图加载失败」 | 看遮罩里的错误码 + `data/client-errors.log`（含设备 UA/时间/错误明细）；`[script]` = 高德 JS API 请求失败（网络/拦截），`[config]` = 服务端 key 未配置 |
 | 改了前端还是旧界面 | 静态资源带 `?v=` 版本串，改完递增；nginx/Node 对 html/js/css 均已禁用缓存 |

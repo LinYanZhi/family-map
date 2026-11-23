@@ -1,12 +1,12 @@
 // @generated
-// 阶段 1 契约自测：静态页 / health / HTTPS / API 404 / HEAD，全部通过 exit 0
+// 阶段 2 契约自测：静态页 / health / config / client-log / HTTPS / API 404 / HEAD
 import http from 'node:http';
 import https from 'node:https';
 
 const HTTP_BASE = `http://127.0.0.1:${process.env.MAP_HTTP_PORT || 8800}`;
 const HTTPS_BASE = `https://127.0.0.1:${process.env.MAP_HTTPS_PORT || 8801}`;
 
-function request(base, pathname, { method = 'GET', insecure = false } = {}) {
+function request(base, pathname, { method = 'GET', insecure = false, body = null, headers = {} } = {}) {
   return new Promise((resolve) => {
     const mod = base.startsWith('https') ? https : http;
     const url = new URL(base + pathname);
@@ -15,6 +15,7 @@ function request(base, pathname, { method = 'GET', insecure = false } = {}) {
       port: url.port,
       path: url.pathname + url.search,
       method,
+      headers,
       rejectUnauthorized: !insecure,
       timeout: 5000,
     }, (res) => {
@@ -24,6 +25,7 @@ function request(base, pathname, { method = 'GET', insecure = false } = {}) {
     });
     req.on('timeout', () => { req.destroy(); resolve({ status: 0, headers: {}, body: 'timeout' }); });
     req.on('error', (err) => resolve({ status: 0, headers: {}, body: err.message }));
+    if (body) req.write(body);
     req.end();
   });
 }
@@ -63,6 +65,13 @@ check('config 200', cfg.status === 200, `status=${cfg.status}${cfgJson?.error ? 
 check('config 下发 JS key', typeof cfgJson?.amap?.jsKey === 'string' && cfgJson.amap.jsKey.length > 10);
 check('config 下发安全密钥', typeof cfgJson?.amap?.securityJsCode === 'string' && cfgJson.amap.securityJsCode.length > 10);
 check('config 不含 Web 服务 key 字段', !('webServiceKey' in (cfgJson?.amap || {})));
+
+const clientLog = await request(HTTP_BASE, '/api/client-log', {
+  method: 'POST',
+  body: JSON.stringify({ code: 'smoke', message: 'smoke test', ua: 'smoke', href: '/' }),
+  headers: { 'Content-Type': 'application/json' },
+});
+check('client-log 接受上报', clientLog.status === 200 && JSON.parse(clientLog.body)?.ok === true, `status=${clientLog.status}`);
 
 const page404 = await request(HTTP_BASE, '/no-such-page.html');
 check('未知页面 404', page404.status === 404, `status=${page404.status}`);

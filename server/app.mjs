@@ -9,6 +9,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB_ROOT = path.join(ROOT, 'web');
 const DATA_DIR = path.join(ROOT, 'data');
 const PID_FILE = path.join(DATA_DIR, 'app.pid');
+const CLIENT_LOG = path.join(DATA_DIR, 'client-errors.log');
 const SECRETS_FILE = path.join(ROOT, 'deploy', 'secrets.local.json');
 const HOST = process.env.MAP_HOST || '127.0.0.1';
 const PORT = Number(process.env.MAP_PORT || 8802);
@@ -69,6 +70,28 @@ function readAmapConfig() {
   }
 }
 
+function readBody(req, limit = 8192) {
+  return new Promise((resolve) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        resolve(null);
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', () => resolve(null));
+  });
+}
+
+function sanitize(value, max = 500) {
+  return String(value ?? '').replace(/[\r\n]+/g, ' ').slice(0, max);
+}
+
 // 把 URL 路径映射到 web/ 内部；越界路径返回 null（防目录穿越）
 function resolveFile(pathname) {
   const filePath = path.resolve(WEB_ROOT, '.' + pathname);
@@ -117,7 +140,7 @@ function serveStatic(req, res, pathname) {
     .pipe(res);
 }
 
-const server = http.createServer((req, res) => {
+async function handleRequest(req, res) {
   try {
     const url = new URL(req.url || '/', 'http://map-app.local');
     const pathname = decodeURIComponent(url.pathname);
@@ -145,6 +168,28 @@ const server = http.createServer((req, res) => {
       return json(res, 200, payload);
     }
 
+    // 前端加载/初始化失败上报：写到 data/client-errors.log，便于手机端问题不留白
+    if (pathname === '/api/client-log') {
+      if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+      const body = await readBody(req);
+      if (body === null) return json(res, 413, { ok: false, error: 'body_too_large' });
+      let data = null;
+      try { data = JSON.parse(body); } catch { /* 允许非 JSON */ }
+      const line = [
+        `[${new Date().toISOString()}]`,
+        `code=${sanitize(data?.code, 40)}`,
+        `message=${sanitize(data?.message, 400)}`,
+        `ua=${sanitize(data?.ua, 300)}`,
+        `href=${sanitize(data?.href, 200)}`,
+        `detail=${sanitize(JSON.stringify(data?.detail ?? ''), 600)}`,
+      ].join(' | ') + '\n';
+      try {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.appendFileSync(CLIENT_LOG, line);
+      } catch { /* 日志写失败不影响响应 */ }
+      return json(res, 200, { ok: true });
+    }
+
     if (pathname.startsWith('/api/')) return json(res, 404, { ok: false, error: 'not_found', path: pathname });
     if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { ok: false, error: 'method_not_allowed' });
 
@@ -154,6 +199,14 @@ const server = http.createServer((req, res) => {
     else res.destroy();
     console.error('[map-app] request error:', err?.message || err);
   }
+}
+
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch((err) => {
+    console.error('[map-app] request error:', err?.message || err);
+    if (!res.headersSent) json(res, 500, { ok: false, error: 'internal_error' });
+    else res.destroy();
+  });
 });
 
 function cleanupPid() {
