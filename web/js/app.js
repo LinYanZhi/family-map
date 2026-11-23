@@ -21,9 +21,12 @@ const els = {
   overlayText: document.getElementById('overlay-text'),
   overlayRetry: document.getElementById('overlay-retry'),
   diag: document.getElementById('diag'),
+  pickbar: document.getElementById('pickbar'),
+  pickCancel: document.getElementById('pick-cancel'),
 };
 
-const state = { mapView: null, sheet: null, active: null, panels: {} };
+const state = { mapView: null, sheet: null, active: null, panels: {}, pickResolve: null };
+const reportedErrors = new Set();
 
 function setStatus(name) {
   els.dot.classList.remove('ok', 'err');
@@ -47,6 +50,13 @@ function reportError(code, message, detail) {
       }),
     }).catch(() => {});
   } catch { /* ignore */ }
+}
+
+function reportUncaught(code, message, detail) {
+  const key = `${code}:${message}`;
+  if (reportedErrors.has(key) || reportedErrors.size > 20) return;
+  reportedErrors.add(key);
+  reportError(code, message, detail);
 }
 
 function showError(code, message, detail) {
@@ -99,6 +109,20 @@ async function loadAmap(cfg) {
   throw lastError || new Error('高德 JS API 加载失败');
 }
 
+// iOS 键盘会盖住 fixed 定位的底部面板：用 VisualViewport 把面板抬到键盘上方
+function setupKeyboardInset() {
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  const apply = () => {
+    const inset = Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop));
+    document.documentElement.style.setProperty('--kb-inset', `${inset}px`);
+    document.body.classList.toggle('kb-open', inset > 90);
+  };
+  viewport.addEventListener('resize', apply);
+  viewport.addEventListener('scroll', apply);
+  apply();
+}
+
 function openSheet(kind) {
   const titles = { search: '搜索地点', route: '路线规划', style: '地图样式' };
   state.active = kind;
@@ -113,6 +137,20 @@ function closeSheet() {
   state.sheet?.close();
 }
 
+function hidePickBar() {
+  els.pickbar.hidden = true;
+}
+
+function cancelPickFlow() {
+  if (state.mapView) state.mapView.cancelPick();
+  hidePickBar();
+  if (state.pickResolve) {
+    const resolve = state.pickResolve;
+    state.pickResolve = null;
+    resolve(null);
+  }
+}
+
 async function pickPoint(label) {
   const choice = await actionMenu(`选择${label}`, [
     { id: 'locate', label: '使用我的位置' },
@@ -123,7 +161,9 @@ async function pickPoint(label) {
 
   if (choice === 'locate') {
     try {
-      return await state.mapView.locate();
+      const point = await state.mapView.locate();
+      toast('已使用当前位置');
+      return point;
     } catch (err) {
       toast(geolocationMessage(err));
       return null;
@@ -137,8 +177,16 @@ async function pickPoint(label) {
 
   if (choice === 'map') {
     state.sheet.close();
-    toast('请在地图上点选位置', 8000);
-    const lnglat = await new Promise((resolve) => state.mapView.pickOnce(resolve));
+    els.pickbar.hidden = false;
+    const lnglat = await new Promise((resolve) => {
+      state.pickResolve = resolve;
+      state.mapView.pickOnce((point) => {
+        state.pickResolve = null;
+        resolve(point);
+      });
+    });
+    els.pickbar.hidden = true;
+    if (!lnglat) return null;
     try {
       const data = await api.regeo(lnglat);
       return { name: data.address || '地图选点', location: lnglat };
@@ -191,13 +239,18 @@ function startApp() {
   document.querySelectorAll('.tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       const kind = tab.dataset.sheet;
+      cancelPickFlow();
       if (state.sheet.isOpen && state.active === kind) {
         state.sheet.close();
         return;
       }
-      state.mapView.cancelPick();
       openSheet(kind);
     });
+  });
+
+  els.pickCancel.addEventListener('click', () => {
+    cancelPickFlow();
+    toast('已取消选点');
   });
 
   els.locate.addEventListener('click', async () => {
@@ -211,6 +264,8 @@ function startApp() {
       els.locate.disabled = false;
     }
   });
+
+  setupKeyboardInset();
 
   window.__app = { state, api, panels: state.panels, mapView: state.mapView, openSheet, closeSheet };
   setStatus('ok');
@@ -242,13 +297,11 @@ async function boot() {
 }
 
 window.addEventListener('error', (event) => {
-  if (state.mapView) return;
-  reportError('js', event.message || 'uncaught error', { source: event.filename, line: event.lineno });
+  reportUncaught('js', event.message || 'uncaught error', { source: event.filename, line: event.lineno });
 });
 
 window.addEventListener('unhandledrejection', (event) => {
-  if (state.mapView) return;
-  reportError('promise', String(event.reason || 'unhandled rejection'));
+  reportUncaught('promise', String(event.reason || 'unhandled rejection'));
 });
 
 els.overlayRetry.addEventListener('click', () => location.reload());

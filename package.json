@@ -1,6 +1,6 @@
 {
   "name": "map-app",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "家庭地图 Web 应用（自用，原生 HTML/CSS/JS，零构建）",
   "type": "module",

@@ -148,7 +148,10 @@ export function createRoutePanel(ctx) {
   async function choosePoint(kind, index) {
     const label = kind === 'origin' ? '出发点' : kind === 'destination' ? '终点' : '途径点';
     const point = await ctx.pickPoint(label);
-    if (!point) return;
+    if (!point) {
+      ctx.openSheet('route');
+      return;
+    }
     if (kind === 'origin') state.origin = point;
     else if (kind === 'destination') state.destination = point;
     else {
@@ -157,7 +160,7 @@ export function createRoutePanel(ctx) {
       state.useWaypoints = true;
     }
     clearPlan();
-    render(bodyEl);
+    ctx.openSheet('route');
   }
 
   async function plan() {

@@ -1,9 +1,26 @@
 // @generated
-// 搜索面板：关键词搜索（后端代理高德 POI）、常用地点、结果可直接设为起/终点
+// 搜索面板：关键词搜索（后端代理高德 POI）、常用/最近地点、结果可直接设为起/终点
 import { api } from './api.js';
 import { escapeHtml, toast } from './ui.js';
 
 const QUICK = ['白云万达广场', '广州塔', '番禺广场', '白云机场', '北京路步行街'];
+const RECENT_KEY = 'map-app:recent';
+
+function readRecent() {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+    return Array.isArray(list) ? list.slice(0, 5).filter((word) => typeof word === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushRecent(word) {
+  try {
+    const list = [word, ...readRecent().filter((item) => item !== word)].slice(0, 5);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch { /* ignore */ }
+}
 
 export function createSearchPanel(ctx) {
   let keyword = '';
@@ -12,6 +29,11 @@ export function createSearchPanel(ctx) {
   let error = '';
   let pick = null;
   let bodyEl = null;
+
+  function chipList() {
+    const recent = readRecent();
+    return [...new Set([...QUICK, ...recent])].slice(0, 8);
+  }
 
   function render(body) {
     bodyEl = body;
@@ -22,7 +44,7 @@ export function createSearchPanel(ctx) {
         <button class="search-submit" type="submit">搜索</button>
       </form>
       <div class="chips">
-        ${QUICK.map((word) => `<button type="button" class="chip" data-word="${escapeHtml(word)}">${escapeHtml(word)}</button>`).join('')}
+        ${chipList().map((word) => `<button type="button" class="chip" data-word="${escapeHtml(word)}">${escapeHtml(word)}</button>`).join('')}
       </div>
       <p class="panel-hint" data-hint ${pick ? '' : 'hidden'}></p>
       <div class="results"></div>
@@ -45,6 +67,13 @@ export function createSearchPanel(ctx) {
     body.querySelector('.results').addEventListener('click', onResultsClick);
 
     renderResults();
+
+    requestAnimationFrame(() => {
+      try {
+        input.focus({ preventScroll: true });
+        input.select(); // 再次打开搜索时全选旧关键词，直接输入即替换
+      } catch { /* ignore */ }
+    });
   }
 
   function renderResults() {
@@ -93,6 +122,7 @@ export function createSearchPanel(ctx) {
       const data = await api.searchPoi(query);
       results = data.pois || [];
       status = 'done';
+      pushRecent(query);
     } catch (err) {
       status = 'error';
       error = err.message;

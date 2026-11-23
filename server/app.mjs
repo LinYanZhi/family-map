@@ -19,7 +19,10 @@ const SERVICE = 'map-app';
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const VERSION = pkg.version || '0.0.0';
 const STARTED_AT = Date.now();
-const amapClient = createAmapClient({ secretsFile: SECRETS_FILE });
+const amapClient = createAmapClient({
+  secretsFile: SECRETS_FILE,
+  cacheFile: path.join(DATA_DIR, 'amap-cache.json'),
+});
 const LOCATION_RE = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
 
 function sendAmapError(res, err) {
@@ -62,6 +65,7 @@ function healthPayload() {
     service: SERVICE,
     version: VERSION,
     uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000),
+    amapCache: amapClient.stats(),
     now: new Date().toISOString(),
   };
 }
@@ -183,8 +187,10 @@ async function handleRequest(req, res) {
       if (!keywords) return json(res, 400, { ok: false, error: 'missing_keywords' });
       if (keywords.length > 80) return json(res, 400, { ok: false, error: 'keywords_too_long' });
       try {
-        const pois = await amapClient.searchPoi({ keywords, city: url.searchParams.get('city') || '广州' });
-        return json(res, 200, { ok: true, count: pois.length, pois });
+        const result = await amapClient.searchPoi({ keywords, city: url.searchParams.get('city') || '广州' });
+        return json(res, 200, { ok: true, count: result.pois.length, pois: result.pois }, {
+          'X-Amap-Cache': result.cacheHit ? 'hit' : 'miss',
+        });
       } catch (err) {
         return sendAmapError(res, err);
       }
@@ -195,7 +201,8 @@ async function handleRequest(req, res) {
       const location = url.searchParams.get('location') || '';
       if (!LOCATION_RE.test(location)) return json(res, 400, { ok: false, error: 'bad_location' });
       try {
-        return json(res, 200, { ok: true, ...(await amapClient.regeo({ location })) });
+        const { cacheHit, ...result } = await amapClient.regeo({ location });
+        return json(res, 200, { ok: true, ...result }, { 'X-Amap-Cache': cacheHit ? 'hit' : 'miss' });
       } catch (err) {
         return sendAmapError(res, err);
       }
@@ -215,8 +222,8 @@ async function handleRequest(req, res) {
         return json(res, 400, { ok: false, error: 'bad_waypoints' });
       }
       try {
-        const result = await amapClient.route({ mode, origin, destination, waypoints: waypoints.join(';') });
-        return json(res, 200, { ok: true, ...result });
+        const { cacheHit, ...result } = await amapClient.route({ mode, origin, destination, waypoints: waypoints.join(';') });
+        return json(res, 200, { ok: true, ...result }, { 'X-Amap-Cache': cacheHit ? 'hit' : 'miss' });
       } catch (err) {
         return sendAmapError(res, err);
       }

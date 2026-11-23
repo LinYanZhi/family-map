@@ -92,6 +92,13 @@ node server\gen-cert.mjs --force
 - **样式**：暗黑（默认）/ 标准 / 浅色 / 灰白，选择写入 localStorage；暗黑适合夜间/车内。
 - 右下角定位按钮：浏览器 Geolocation，蓝点 + 精度圈；HTTPS 下才允许（iOS 限制）。
 - 加载失败显示错误码遮罩（`[config]` / `[script]` / `[init]` / `[js]`）并自动上报 `data/client-errors.log`；高德脚本首次失败自动重试。
+- 手机细节：iOS 键盘弹出时面板自动抬到键盘上方（底栏隐藏）；搜索框打开即聚焦并全选旧词；「在地图上选点」有顶部提示条 + 取消；选完点自动回到路线面板；toast 不挡点击。
+
+**缓存策略（持久化）**
+
+- 内存 + 磁盘缓存写 `data/amap-cache.json`（不进 git，重启后仍在），命中时响应头 `X-Amap-Cache: hit`。
+- TTL 按接口区分：**POI 搜索 24 小时 / 逆地理 7 天 / 路线 30 分钟**（路况会变，所以短）。
+- 说明：这些是「查过的结果」缓存，不是把广州全量 POI 抓下来存本地（高德条款不允许批量抓取，且 POI 会变）；想长期保存的是自己的**收藏点**（后续做）。
 
 **后端接口（key 只在服务端）**
 
@@ -101,7 +108,7 @@ node server\gen-cert.mjs --force
 | `GET /api/regeo` | `location=lng,lat` | 逆地理编码，地图选点取名用 |
 | `GET /api/route` | `mode=driving\|walking\|riding`、`origin`、`destination`、`waypoints`（`;` 分隔，仅驾车） | 距离/时长/步骤/折线 |
 
-服务端对高德请求做 **5 分钟缓存**（同参数复用）+ **每分钟 90 次**限流，保护个人免费额度；超限返回 `429 amap_rate_limited`。
+服务端对高德请求做持久缓存 + **每分钟 90 次**限流，保护个人免费额度；超限返回 `429 amap_rate_limited`。命中缓存的响应带 `X-Amap-Cache: hit`。
 
 自测可通过 `window.__app` 读取面板/地图状态（CDP 断言用）：`__app.mapView.getStyle()`、`__app.panels.search.getResults()`、`__app.panels.route.getState()`。
 
@@ -109,7 +116,7 @@ node server\gen-cert.mjs --force
 
 ```powershell
 node tests\smoke.mjs    # 25 项离线契约检查（不消耗高德配额）
-node tests\live.mjs     # 7 项真实高德接口检查（POI/逆地理/驾车/途径点/步行，会消耗少量配额）
+node tests\live.mjs     # 8 项真实高德接口检查（POI/缓存命中/逆地理/驾车/途径点/步行，会消耗少量配额）
 ```
 
 `smoke.mjs` 覆盖：页面/health/config/上报/各接口参数校验/模块加载/HTTPS/404/HEAD/缓存头。

@@ -1,11 +1,20 @@
 // @generated
-// 高德 Web 服务 API 代理：POI 搜索 / 逆地理 / 路径规划（key 只在服务端，5 分钟缓存 + 限流）
+// 高德 Web 服务 API 代理：POI 搜索 / 逆地理 / 路径规划
+// key 只在服务端；内存 + 磁盘持久缓存（按接口设不同 TTL）+ 每分钟限流
 import fs from 'node:fs';
+import path from 'node:path';
 
-const CACHE_TTL_MS = 5 * 60 * 1000;
-const CACHE_MAX = 400;
+const CACHE_MAX = 600;
 const RATE_WINDOW_MS = 60 * 1000;
 const RATE_MAX = 90;
+
+// 不同接口的缓存时长：POI 一天、逆地理七天、路线三十分钟（路况会变）
+const TTL_RULES = [
+  { prefix: '/v3/place/text', ttl: 24 * 3600 * 1000 },
+  { prefix: '/v3/geocode/regeo', ttl: 7 * 24 * 3600 * 1000 },
+  { prefix: '/v3/direction/', ttl: 30 * 60 * 1000 },
+];
+const DEFAULT_TTL = 5 * 60 * 1000;
 
 export class AmapError extends Error {
   constructor(message, status = 502, code = 'amap_error') {
@@ -15,9 +24,6 @@ export class AmapError extends Error {
     this.code = code;
   }
 }
-
-const cache = new Map();
-const callTimes = [];
 
 const DIRECTIONS = new Set(['driving', 'walking', 'riding']);
 const LOCATION_RE = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
@@ -36,29 +42,70 @@ function stripTags(text) {
 }
 
 function mergePolyline(steps) {
-  const path = [];
+  const pathPoints = [];
   for (const step of steps) {
-    const raw = step.polyline || '';
-    for (const pair of raw.split(';')) {
+    for (const pair of String(step.polyline || '').split(';')) {
       const point = parseLocation(pair);
       if (!point) continue;
-      const last = path[path.length - 1];
+      const last = pathPoints[pathPoints.length - 1];
       if (last && last[0] === point[0] && last[1] === point[1]) continue;
-      path.push(point);
+      pathPoints.push(point);
     }
   }
-  return path;
+  return pathPoints;
 }
 
-function cachePut(key, data) {
-  if (cache.size >= CACHE_MAX) {
-    const oldest = cache.keys().next().value;
-    if (oldest) cache.delete(oldest);
+function ttlFor(pathname) {
+  const rule = TTL_RULES.find((item) => pathname.startsWith(item.prefix));
+  return rule ? rule.ttl : DEFAULT_TTL;
+}
+
+export function createAmapClient({ secretsFile, cacheFile = null, fetchImpl = globalThis.fetch }) {
+  const cache = new Map();
+  const callTimes = [];
+  let saveTimer = 0;
+
+  function prune(now = Date.now()) {
+    for (const [key, entry] of cache) {
+      const pathname = key.slice(0, key.indexOf('?'));
+      if (now - entry.at > ttlFor(pathname)) cache.delete(key);
+    }
+    while (cache.size > CACHE_MAX) {
+      const oldest = cache.keys().next().value;
+      cache.delete(oldest);
+    }
   }
-  cache.set(key, { at: Date.now(), data });
-}
 
-export function createAmapClient({ secretsFile, fetchImpl = globalThis.fetch }) {
+  function loadCache() {
+    if (!cacheFile) return;
+    try {
+      const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      for (const [key, entry] of Object.entries(raw.entries || {})) {
+        if (entry && typeof entry.at === 'number' && entry.data) cache.set(key, entry);
+      }
+      prune();
+    } catch { /* 首次运行或文件损坏 */ }
+  }
+
+  function saveCache() {
+    if (!cacheFile) return;
+    try {
+      fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+      const entries = {};
+      for (const [key, entry] of cache) entries[key] = entry;
+      const tmp = `${cacheFile}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify({ version: 1, savedAt: Date.now(), entries }));
+      fs.renameSync(tmp, cacheFile);
+    } catch { /* 落盘失败不影响请求 */ }
+  }
+
+  function scheduleSave() {
+    if (!cacheFile) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveCache, 800);
+    saveTimer.unref?.();
+  }
+
   function readKey() {
     if (process.env.MAP_AMAP_WS_KEY) return process.env.MAP_AMAP_WS_KEY;
     try {
@@ -82,9 +129,12 @@ export function createAmapClient({ secretsFile, fetchImpl = globalThis.fetch }) 
     const key = readKey();
     if (!key) throw new AmapError('服务端未配置高德 Web 服务 key', 503, 'amap_key_missing');
 
-    const cacheKey = pathname + '?' + new URLSearchParams(params).toString();
+    const cacheKey = `${pathname}?${new URLSearchParams(params).toString()}`;
     const cached = cache.get(cacheKey);
-    if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.data;
+    if (cached && Date.now() - cached.at < ttlFor(pathname)) {
+      return { data: cached.data, cacheHit: true };
+    }
+    if (cached) cache.delete(cacheKey);
 
     assertRate();
     const query = new URLSearchParams({ ...params, key }).toString();
@@ -105,19 +155,21 @@ export function createAmapClient({ secretsFile, fetchImpl = globalThis.fetch }) 
       throw new AmapError(`高德接口错误：${data.info || 'unknown'}（${data.infocode || '-'}）`, 502, 'amap_api_error');
     }
 
-    cachePut(cacheKey, data);
-    return data;
+    cache.set(cacheKey, { at: Date.now(), data });
+    prune();
+    scheduleSave();
+    return { data, cacheHit: false };
   }
 
   async function searchPoi({ keywords, city = '广州' }) {
-    const data = await call('/v3/place/text', {
+    const { data, cacheHit } = await call('/v3/place/text', {
       keywords,
       city,
       offset: '20',
       page: '1',
       extensions: 'base',
     });
-    return (data.pois || [])
+    const pois = (data.pois || [])
       .filter((poi) => poi.location)
       .map((poi) => ({
         id: poi.id,
@@ -127,10 +179,11 @@ export function createAmapClient({ secretsFile, fetchImpl = globalThis.fetch }) 
         type: poi.type || '',
         location: parseLocation(poi.location),
       }));
+    return { pois, cacheHit };
   }
 
   async function regeo({ location }) {
-    const data = await call('/v3/geocode/regeo', { location, extensions: 'base' });
+    const { data, cacheHit } = await call('/v3/geocode/regeo', { location, extensions: 'base' });
     const rc = data.regeocode || {};
     return {
       address: rc.formatted_address || '',
@@ -139,6 +192,7 @@ export function createAmapClient({ secretsFile, fetchImpl = globalThis.fetch }) 
         address: typeof poi.address === 'string' ? poi.address : '',
         location: parseLocation(poi.location),
       })),
+      cacheHit,
     };
   }
 
@@ -147,24 +201,32 @@ export function createAmapClient({ secretsFile, fetchImpl = globalThis.fetch }) 
     const params = { origin, destination, extensions: 'base' };
     if (safeMode === 'driving' && waypoints) params.waypoints = waypoints;
 
-    const data = await call(`/v3/direction/${safeMode}`, params);
-    const path = data.route?.paths?.[0];
-    if (!path) throw new AmapError('没有找到可用路线', 404, 'amap_no_route');
+    const { data, cacheHit } = await call(`/v3/direction/${safeMode}`, params);
+    const routePath = data.route?.paths?.[0];
+    if (!routePath) throw new AmapError('没有找到可用路线', 404, 'amap_no_route');
 
-    const steps = (path.steps || []).map((step) => ({
+    const steps = (routePath.steps || []).map((step) => ({
       instruction: stripTags(step.instruction),
       distance: Number(step.distance) || 0,
       duration: Number(step.duration) || 0,
     }));
-    const duration = Number(path.duration) || steps.reduce((sum, s) => sum + s.duration, 0);
+    const duration = Number(routePath.duration) || steps.reduce((sum, step) => sum + step.duration, 0);
     return {
       mode: safeMode,
-      distance: Number(path.distance) || 0,
+      distance: Number(routePath.distance) || 0,
       duration,
       steps,
-      polyline: mergePolyline(path.steps || []),
+      polyline: mergePolyline(routePath.steps || []),
+      cacheHit,
     };
   }
 
-  return { searchPoi, regeo, route };
+  function stats() {
+    prune();
+    return { entries: cache.size, persistent: Boolean(cacheFile) };
+  }
+
+  loadCache();
+
+  return { searchPoi, regeo, route, stats };
 }

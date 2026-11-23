@@ -29,6 +29,18 @@ try {
 }
 
 try {
+  const url = `${BASE}/api/poi?keywords=${encodeURIComponent('白云万达广场')}`;
+  const first = await fetch(url);
+  await first.json();
+  const second = await fetch(url);
+  await second.json();
+  const cacheHeader = second.headers.get('x-amap-cache');
+  check('POI 第二次命中缓存', cacheHeader === 'hit', `x-amap-cache=${cacheHeader}`);
+} catch (err) {
+  fail('POI 第二次命中缓存', err);
+}
+
+try {
   const regeo = await getJson('/api/regeo?location=113.272674,23.156789');
   check('逆地理返回地址', Boolean(regeo.address), regeo.address);
 } catch (err) {
