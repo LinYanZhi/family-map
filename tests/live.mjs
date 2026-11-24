@@ -84,6 +84,14 @@ if (destination) {
   } catch (err) {
     fail('多方案返回', err);
   }
+
+  try {
+    const along = await getJson(`/api/route/along?mode=driving&origin=113.272674,23.156789&destination=113.384,22.938&keywords=${encodeURIComponent('麦当劳')}`);
+    check('沿途找返回候选', Array.isArray(along.candidates) && along.candidates.length > 0, `count=${along.candidates?.length}`);
+    check('沿途候选带绕行距离', (along.candidates || []).every((item) => Number.isFinite(item.distanceToRoute) && Number.isFinite(item.detour)), `first=${along.candidates?.[0]?.name || '-'} ${along.candidates?.[0]?.distanceToRoute ?? '-'}m`);
+  } catch (err) {
+    fail('沿途找返回候选', err);
+  }
 } else {
   console.log('SKIP  路线测试（拿不到目的地坐标）');
 }

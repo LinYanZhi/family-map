@@ -91,6 +91,12 @@ check('plans 非法坐标返回 400', plansBad.status === 400, `status=${plansBa
 const plansBadStrategy = await request(HTTP_BASE, '/api/route/plans?mode=driving&origin=113.2,23.1&destination=113.3,23.2&strategies=abc');
 check('plans 非法策略返回 400', plansBadStrategy.status === 400, `status=${plansBadStrategy.status}`);
 
+const alongBadPoint = await request(HTTP_BASE, '/api/route/along?mode=driving&origin=x&destination=y&keywords=%E9%BA%A6%E5%BD%93%E5%8A%B3');
+check('along 非法坐标返回 400', alongBadPoint.status === 400, `status=${alongBadPoint.status}`);
+
+const alongNoKeywords = await request(HTTP_BASE, '/api/route/along?mode=driving&origin=113.2,23.1&destination=113.3,23.2');
+check('along 缺关键词返回 400', alongNoKeywords.status === 400, `status=${alongNoKeywords.status}`);
+
 const mapModule = await request(HTTP_BASE, '/js/map.js');
 check('模块 js/map.js 可加载', mapModule.status === 200 && mapModule.body.includes('MAP_STYLES'), `status=${mapModule.status}`);
 

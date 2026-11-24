@@ -5,6 +5,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAmapClient, AmapError } from './amap.mjs';
+import { buildCorridorPolygon, distanceToPolyline, sampleEvenly } from './geo.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB_ROOT = path.join(ROOT, 'web');
@@ -285,6 +286,58 @@ async function handleRequest(req, res) {
           } catch { /* 对比失败不影响主方案 */ }
         }
         return json(res, 200, { ok: true, mode, plans, direct: directPlan });
+      } catch (err) {
+        return sendAmapError(res, err);
+      }
+    }
+
+    // 沿途找：规划起终点路线 → 路线走廊内搜关键词 POI → 按离路线最近（绕行最少）排序
+    if (pathname === '/api/route/along') {
+      if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+      const mode = url.searchParams.get('mode') || 'driving';
+      const origin = url.searchParams.get('origin') || '';
+      const destination = url.searchParams.get('destination') || '';
+      const keywords = (url.searchParams.get('keywords') || '').trim();
+      const corridor = Math.min(3000, Math.max(100, Number(url.searchParams.get('corridor')) || 800));
+      const limit = Math.min(10, Math.max(1, Number(url.searchParams.get('limit')) || 6));
+      if (!LOCATION_RE.test(origin) || !LOCATION_RE.test(destination)) {
+        return json(res, 400, { ok: false, error: 'bad_point' });
+      }
+      if (!keywords || keywords.length > 40) {
+        return json(res, 400, { ok: false, error: 'bad_keywords' });
+      }
+      try {
+        const route = await amapClient.route({ mode, origin, destination });
+        const polyline = route.polyline || [];
+        if (polyline.length < 2) throw new AmapError('没有找到可用路线', 404, 'amap_no_route');
+
+        const findAlong = async (width) => {
+          const samples = sampleEvenly(polyline, 8);
+          const polygon = buildCorridorPolygon(samples, width);
+          const pois = await amapClient.polygonSearch({ polygon, keywords });
+          const seen = new Set();
+          const list = [];
+          for (const poi of pois) {
+            if (!poi.location || seen.has(poi.id)) continue;
+            seen.add(poi.id);
+            const distance = distanceToPolyline(polyline, poi.location);
+            if (distance > width * 1.3) continue;
+            list.push({ ...poi, distanceToRoute: Math.round(distance), detour: Math.round(distance * 2) });
+          }
+          list.sort((a, b) => a.detour - b.detour);
+          return list;
+        };
+
+        let candidates = await findAlong(corridor);
+        if (!candidates.length && corridor < 1600) candidates = await findAlong(corridor * 2);
+
+        return json(res, 200, {
+          ok: true,
+          keywords,
+          corridor,
+          route: { mode: route.mode, distance: route.distance, duration: route.duration, polyline },
+          candidates: candidates.slice(0, limit),
+        });
       } catch (err) {
         return sendAmapError(res, err);
       }

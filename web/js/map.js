@@ -46,6 +46,7 @@ export class MapView {
     this.routeLines = [];
     this.routeLine = null;
     this.directLine = null;
+    this.candidateMarkers = [];
     this.searchMarker = null;
     this.locationMarker = null;
     this.locationCircle = null;
@@ -215,6 +216,7 @@ export class MapView {
   setRoute({ origin, destination, waypoints = [], polyline = [], directPolyline = null }) {
     this.clearRoute();
     this.clearSearchMarker();
+    this.clearCandidateMarkers();
 
     const markers = [];
     if (origin) markers.push(this._pin(origin, '起', 'origin'));
@@ -277,5 +279,32 @@ export class MapView {
 
   follow(location, zoom = 17) {
     this.map.setZoomAndCenter(zoom, location);
+  }
+
+  // 沿途候选点（数字小标记）
+  setCandidateMarkers(points) {
+    this.clearCandidateMarkers();
+    if (!points || !points.length) return;
+    this.candidateMarkers = points.map((location, index) => {
+      const node = document.createElement('div');
+      node.className = 'pin pin-candidate';
+      node.textContent = String(index + 1);
+      const marker = new this.AMap.Marker({
+        position: location,
+        anchor: 'bottom-center',
+        content: node,
+        title: `沿途候选 ${index + 1}`,
+        zIndex: 120,
+      });
+      this.map.add(marker);
+      return marker;
+    });
+  }
+
+  clearCandidateMarkers() {
+    if (this.candidateMarkers && this.candidateMarkers.length) {
+      this.map.remove(this.candidateMarkers);
+    }
+    this.candidateMarkers = [];
   }
 }

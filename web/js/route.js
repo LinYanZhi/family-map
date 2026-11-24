@@ -10,6 +10,8 @@ const MODES = [
   { id: 'riding', name: '骑行' },
 ];
 
+const ALONG_CHIPS = ['麦当劳', '加油站', '便利店', '停车场', '充电站'];
+
 const distanceText = (m) => formatDistance(m);
 const durationText = (s) => formatDuration(s);
 
@@ -25,6 +27,7 @@ export function createRoutePanel(ctx) {
     activePlan: 0,
     loading: false,
     error: '',
+    along: { keyword: '', loading: false, error: '', candidates: [] },
   };
   let bodyEl = null;
   let justPlanned = false;
@@ -83,6 +86,30 @@ export function createRoutePanel(ctx) {
     </div>`;
   }
 
+  function alongHtml() {
+    const along = state.along;
+    return `<div class="along-box">
+      <div class="along-head">
+        <strong>沿途找最近的</strong>
+        <span class="along-sub">例：麦当劳、加油站（按绕行距离排序）</span>
+      </div>
+      <div class="along-form">
+        <input class="along-input" type="text" placeholder="输入关键词，如 麦当劳" value="${escapeHtml(along.keyword)}" enterkeyhint="search">
+        <button type="button" class="along-btn" data-action="along" ${along.loading ? 'disabled' : ''}>${along.loading ? '搜索中…' : '找沿途'}</button>
+      </div>
+      <div class="along-chips">
+        ${ALONG_CHIPS.map((word) => `<button type="button" class="chip" data-along-word="${escapeHtml(word)}">${escapeHtml(word)}</button>`).join('')}
+      </div>
+      ${along.error ? `<p class="panel-error">${escapeHtml(along.error)}</p>` : ''}
+      ${along.candidates.length ? `<div class="along-results">${along.candidates.map((candidate, index) => `
+        <button type="button" class="along-candidate" data-candidate-index="${index}">
+          <span class="ac-name">${index + 1}. ${escapeHtml(candidate.name)}</span>
+          <span class="ac-meta">距路线 ${candidate.distanceToRoute} 米 · 绕行约 ${candidate.detour} 米${candidate.adname ? ` · ${escapeHtml(candidate.adname)}` : ''}</span>
+          <span class="ac-pick">设为途经点 ›</span>
+        </button>`).join('')}</div>` : ''}
+    </div>`;
+  }
+
   function resultHtml() {
     if (state.error) return `<p class="panel-error">${escapeHtml(state.error)}</p>`;
     if (!state.plans.length) return '';
@@ -123,6 +150,7 @@ export function createRoutePanel(ctx) {
       </div>
       ${showWaypoints && state.mode !== 'driving' ? '<p class="panel-hint">步行/骑行暂不支持途径点，将按直达路线规划</p>' : ''}
       ${state.origin && !state.destination ? '<p class="panel-hint">下一步：点「终」选择终点，或直接搜索第二个地点</p>' : ''}
+      ${state.mode === 'driving' ? alongHtml() : ''}
       <button type="button" class="primary-btn" data-action="plan" ${state.loading ? 'disabled' : ''}>
         ${state.loading ? '规划中…' : (state.plans.length ? '重新规划' : '规划路线')}
       </button>
@@ -175,6 +203,18 @@ export function createRoutePanel(ctx) {
       button.addEventListener('click', plan);
     });
 
+    body.querySelectorAll('[data-action="along"]').forEach((button) => {
+      button.addEventListener('click', () => runAlong(body.querySelector('.along-input')?.value));
+    });
+
+    body.querySelectorAll('[data-along-word]').forEach((button) => {
+      button.addEventListener('click', () => runAlong(button.dataset.alongWord));
+    });
+
+    body.querySelectorAll('[data-candidate-index]').forEach((button) => {
+      button.addEventListener('click', () => selectCandidate(Number(button.dataset.candidateIndex)));
+    });
+
     body.querySelectorAll('[data-plan-index]').forEach((button) => {
       button.addEventListener('click', () => {
         state.activePlan = Number(button.dataset.planIndex);
@@ -201,7 +241,63 @@ export function createRoutePanel(ctx) {
     state.direct = null;
     state.activePlan = 0;
     state.error = '';
+    state.along.candidates = [];
+    state.along.error = '';
+    state.along.loading = false;
+    ctx.mapView.clearCandidateMarkers();
     ctx.mapView.clearRoute();
+  }
+
+  async function runAlong(words) {
+    const keywords = String(words || '').trim();
+    if (!keywords) {
+      toast('先输入想找的地方，比如「麦当劳」');
+      return;
+    }
+    if (!state.origin || !state.destination) {
+      toast('先选择出发点和终点，再找沿途');
+      return;
+    }
+    state.along.keyword = keywords;
+    state.along.loading = true;
+    state.along.error = '';
+    state.along.candidates = [];
+    render(bodyEl);
+    try {
+      const data = await api.alongPoi({
+        mode: state.mode,
+        origin: state.origin.location,
+        destination: state.destination.location,
+        keywords,
+        corridor: 800,
+      });
+      state.along.candidates = data.candidates || [];
+      if (!state.along.candidates.length) {
+        state.along.error = `路线附近没找到「${keywords}」，换个关键词试试`;
+      } else {
+        ctx.mapView.setCandidateMarkers(state.along.candidates.map((item) => item.location));
+      }
+      ctx.trace?.('along:done', { keywords, candidates: state.along.candidates.length });
+    } catch (err) {
+      state.along.error = err.message;
+      ctx.trace?.('along:failed', { keywords, message: err.message });
+    }
+    state.along.loading = false;
+    render(bodyEl);
+  }
+
+  function selectCandidate(index) {
+    const candidate = state.along.candidates[index];
+    if (!candidate) return;
+    ctx.trace?.('along:pick', { name: candidate.name, detour: candidate.detour });
+    state.waypoints.push({ name: candidate.name, location: candidate.location });
+    state.useWaypoints = true;
+    state.along.candidates = [];
+    ctx.mapView.clearCandidateMarkers();
+    clearPlan();
+    render(bodyEl);
+    toast(`已把「${candidate.name}」设为途经点，正在规划…`);
+    plan();
   }
 
   function drawActive() {

@@ -1169,6 +1169,126 @@ body.kb-open .toast {
   font-weight: 700;
 }
 
+/* ===== 沿途找（路线走廊内找最近的店） ===== */
+.along-box {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.along-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.along-head strong {
+  font-size: 13px;
+}
+
+.along-sub {
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.along-form {
+  display: flex;
+  gap: 8px;
+}
+
+.along-input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(8, 18, 30, 0.55);
+  color: var(--text);
+  font-size: 16px;
+  font-family: inherit;
+  outline: none;
+}
+
+.along-input:focus {
+  border-color: rgba(76, 154, 255, 0.6);
+}
+
+.along-btn {
+  height: 38px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(76, 154, 255, 0.18);
+  color: #bcd8ff;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.along-btn[disabled] {
+  opacity: 0.6;
+}
+
+.along-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.along-chips .chip {
+  padding: 5px 10px;
+  font-size: 11.5px;
+}
+
+.along-results {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.along-candidate {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(8, 18, 30, 0.45);
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.along-candidate:active {
+  background: rgba(76, 154, 255, 0.14);
+}
+
+.ac-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ac-meta {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.ac-pick {
+  font-size: 11px;
+  color: #8fb8ff;
+}
+
+.pin-candidate {
+  background: #fff;
+  border-color: var(--accent);
+  color: #0a1622;
+}
+
 /* ===== 导航模式 ===== */
 .nav {
   position: fixed;

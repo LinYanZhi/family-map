@@ -11,6 +11,7 @@ const MIN_OUTBOUND_INTERVAL_MS = 350; // 高德个人 key 有 QPS 限制，串�
 
 // 不同接口的缓存时长：POI 一天、逆地理七天、路线三十分钟（路况会变）
 const TTL_RULES = [
+  { prefix: '/v3/place/polygon', ttl: 24 * 3600 * 1000 },
   { prefix: '/v3/place/text', ttl: 24 * 3600 * 1000 },
   { prefix: '/v3/geocode/regeo', ttl: 7 * 24 * 3600 * 1000 },
   { prefix: '/v3/direction/', ttl: 30 * 60 * 1000 },
@@ -201,6 +202,32 @@ export function createAmapClient({ secretsFile, cacheFile = null, fetchImpl = gl
     });
   }
 
+  async function polygonSearch({ polygon, keywords, pages = 2 }) {
+    const pois = [];
+    for (let page = 1; page <= pages; page += 1) {
+      const { data } = await call('/v3/place/polygon', {
+        polygon,
+        keywords,
+        offset: '25',
+        page: String(page),
+        extensions: 'base',
+      });
+      const list = data.pois || [];
+      pois.push(...list);
+      if (list.length < 25) break;
+    }
+    return pois
+      .filter((poi) => poi.location)
+      .map((poi) => ({
+        id: poi.id,
+        name: poi.name,
+        address: typeof poi.address === 'string' ? poi.address : '',
+        adname: poi.adname || '',
+        type: poi.type || '',
+        location: parseLocation(poi.location),
+      }));
+  }
+
   async function searchPoi({ keywords, city = '广州' }) {
     const { data, cacheHit } = await call('/v3/place/text', {
       keywords,
@@ -271,5 +298,5 @@ export function createAmapClient({ secretsFile, cacheFile = null, fetchImpl = gl
 
   loadCache();
 
-  return { searchPoi, regeo, route, stats };
+  return { searchPoi, polygonSearch, regeo, route, stats };
 }

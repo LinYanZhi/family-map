@@ -42,4 +42,15 @@ export const api = {
     if (waypoints.length) params.set('waypoints', waypoints.map(fmt).join(';'));
     return getJson(`/api/route/plans?${params.toString()}`);
   },
+  // 沿途找：在起终点路线走廊内搜关键词，按离路线最近排序
+  alongPoi: ({ mode, origin, destination, keywords, corridor = 800 }) => {
+    const params = new URLSearchParams({
+      mode,
+      origin: fmt(origin),
+      destination: fmt(destination),
+      keywords,
+      corridor: String(corridor),
+    });
+    return getJson(`/api/route/along?${params.toString()}`);
+  },
 };
