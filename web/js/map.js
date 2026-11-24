@@ -79,9 +79,9 @@ export class MapView {
     this.styleTimer = setTimeout(() => {
       const entries = this._styleEntries(key);
       const latest = entries[entries.length - 1];
-      const ok = key === 'normal'
-        ? true
-        : Boolean(latest && latest.transferSize > 0 && entries.length > baseline);
+      // 缓存命中时 transferSize 可能为 0，用 decodedBodySize 兜底判断
+      const hasBody = Boolean(latest && (latest.transferSize > 0 || latest.decodedBodySize > 0));
+      const ok = key === 'normal' ? true : Boolean(hasBody && entries.length > baseline);
       this._setDarkFallback(key === 'dark' && !ok);
       this.onStyleResult?.(key, ok, {
         entries: entries.length,
