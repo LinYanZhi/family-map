@@ -26,6 +26,7 @@ export class MapView {
     this.AMap = AMap;
     this.el = el;
     this.onStyleResult = typeof options.onStyleResult === 'function' ? options.onStyleResult : null;
+    this.styleCheck = options.styleCheck !== false;
     this.styleTimer = 0;
     this.darkFallback = false;
     this.styleKey = null;
@@ -55,7 +56,7 @@ export class MapView {
     this.locationCircle = null;
 
     this.map.on('click', (event) => this._handleClick(event));
-    this._scheduleStyleCheck(this.styleKey);
+    if (this.styleCheck) this._scheduleStyleCheck(this.styleKey);
   }
 
   _styleUri(key) {
@@ -74,6 +75,7 @@ export class MapView {
   }
 
   _scheduleStyleCheck(key) {
+    if (!this.styleCheck) return;
     clearTimeout(this.styleTimer);
     const baseline = this._styleEntries(key).length;
     this.styleTimer = setTimeout(() => {
@@ -133,7 +135,7 @@ export class MapView {
     try {
       localStorage.setItem(STYLE_KEY, key);
     } catch { /* ignore */ }
-    this._scheduleStyleCheck(key);
+    if (this.styleCheck) this._scheduleStyleCheck(key);
     return key;
   }
 

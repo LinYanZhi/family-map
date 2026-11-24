@@ -21,6 +21,8 @@ const els = {
   overlayTitle: document.getElementById('overlay-title'),
   overlayText: document.getElementById('overlay-text'),
   overlayRetry: document.getElementById('overlay-retry'),
+  overlayForce: document.getElementById('overlay-force'),
+  overlayCopy: document.getElementById('overlay-copy'),
   diag: document.getElementById('diag'),
   pickbar: document.getElementById('pickbar'),
   pickCancel: document.getElementById('pick-cancel'),
@@ -35,8 +37,17 @@ const els = {
   navExit: document.getElementById('nav-exit'),
 };
 
-const state = { mapView: null, sheet: null, active: null, panels: {}, nav: null, pickResolve: null };
+const state = {
+  mapView: null,
+  sheet: null,
+  active: null,
+  panels: {},
+  nav: null,
+  pickResolve: null,
+  engine: '2.0',
+};
 const reportedErrors = new Set();
+const ENGINE_KEY = 'map-app:engine';
 
 function setStatus(name) {
   els.dot.classList.remove('ok', 'err');
@@ -78,25 +89,67 @@ function showError(code, message, detail) {
   setStatus('err');
   els.overlayTitle.textContent = '地图加载失败';
   els.overlayText.textContent = `[${code}] ${message}`;
+  els.overlayRetry.hidden = false;
+  els.overlayForce.hidden = true;
+  els.overlayCopy.hidden = true;
   if (els.diag) els.diag.textContent = `${navigator.userAgent} · ${new Date().toLocaleString()}`;
   els.overlay.hidden = false;
   reportError(code, message, detail);
+}
+
+function supportsWebGL() {
+  try {
+    const canvas = document.createElement('canvas');
+    return Boolean(window.WebGLRenderingContext
+      && (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
+  } catch {
+    return false;
+  }
+}
+
+function preferredEngine() {
+  try {
+    const forced = localStorage.getItem(ENGINE_KEY);
+    if (forced === '1.4') return '1.4';
+    if (forced === '2.0') return '2.0';
+  } catch { /* ignore */ }
+  // 没有 WebGL 时高德 2.0 会提示「浏览器版本过低」，直接用 1.4
+  return supportsWebGL() ? '2.0' : '1.4';
+}
+
+function setEnginePreference(engine) {
+  try {
+    localStorage.setItem(ENGINE_KEY, engine);
+  } catch { /* ignore */ }
+}
+
+function showCompatOverlay(reason, canForce = true) {
+  setStatus('err');
+  els.overlayTitle.textContent = '浏览器不支持地图引擎';
+  els.overlayText.textContent = `${reason}\n\n${canForce ? '可以点「兼容模式重试」（换用高德 1.4 引擎），或' : ''}换 Chrome / Safari / 高德地图 App 打开（点「复制地址」）。`;
+  els.overlayRetry.hidden = true;
+  els.overlayForce.hidden = !canForce;
+  els.overlayCopy.hidden = false;
+  if (els.diag) els.diag.textContent = `${navigator.userAgent} · 引擎 ${state.engine}`;
+  els.overlay.hidden = false;
+  reportError('browser', 'engine_unsupported', { engine: state.engine, reason, canForce });
 }
 
 function hideOverlay() {
   els.overlay.hidden = true;
 }
 
-function loadAmapOnce(cfg) {
+function loadAmapOnce(cfg, engine) {
   return new Promise((resolve, reject) => {
     if (window.AMap) {
       resolve();
       return;
     }
     window._AMapSecurityConfig = { securityJsCode: cfg.securityJsCode };
+    const version = engine === '1.4' ? '1.4.15' : '2.0';
     const script = document.createElement('script');
-    script.src = `https://webapi.amap.com/maps?v=2.0&key=${encodeURIComponent(cfg.jsKey)}&plugin=AMap.Scale`;
-    const timer = setTimeout(() => reject(new Error('高德 JS API 加载超时（检查网络或隧道）')), 15000);
+    script.src = `https://webapi.amap.com/maps?v=${version}&key=${encodeURIComponent(cfg.jsKey)}&plugin=AMap.Scale`;
+    const timer = setTimeout(() => reject(new Error(`高德 JS API ${version} 加载超时（检查网络或隧道）`)), 15000);
     script.onload = () => {
       clearTimeout(timer);
       if (window.AMap) resolve();
@@ -104,17 +157,17 @@ function loadAmapOnce(cfg) {
     };
     script.onerror = () => {
       clearTimeout(timer);
-      reject(new Error('高德 JS API 脚本请求失败（检查网络）'));
+      reject(new Error(`高德 JS API ${version} 脚本请求失败（检查网络或拦截）`));
     };
     document.head.appendChild(script);
   });
 }
 
-async function loadAmap(cfg) {
+async function loadAmap(cfg, engine) {
   let lastError = null;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      await loadAmapOnce(cfg);
+      await loadAmapOnce(cfg, engine);
       return;
     } catch (err) {
       lastError = err;
@@ -222,8 +275,10 @@ async function pickPoint(label, forcedChoice = null) {
   return null;
 }
 
-function startApp() {
+function startApp(engine) {
+  state.engine = engine;
   state.mapView = new MapView(window.AMap, els.map, {
+    styleCheck: engine === '2.0',
     onStyleResult: (key, ok, detail) => {
       trace('style:check', { key, ok, ...detail });
       if (!ok && key === 'dark') {
@@ -340,7 +395,22 @@ function startApp() {
   };
   window.__nav = state.nav;
   setStatus('ok');
-  toast('地图已加载（白云区）：底部可搜索地点 / 规划路线 / 切换样式', 5000);
+  toast(`地图已加载（白云区 · 引擎 ${engine}）：底部可搜索 / 路线 / 样式`, 5000);
+
+  // 高德在部分内置浏览器会自己弹「浏览器版本过低」提示；检测到就引导切换兼容模式
+  setTimeout(() => {
+    const text = els.map.innerText || '';
+    if (/浏览器版本过低|请升级.{0,8}浏览器|不支持.{0,6}浏览器/.test(text)) {
+      trace('engine:unsupported', { engine, snippet: text.slice(0, 80) });
+      const canForce = engine === '2.0';
+      showCompatOverlay(
+        canForce
+          ? '当前浏览器不支持高德地图 2.0（内置浏览器/旧内核常见）。'
+          : '兼容引擎 1.4 在当前浏览器也不可用。',
+        canForce,
+      );
+    }
+  }, 2600);
 }
 
 async function boot() {
@@ -354,14 +424,31 @@ async function boot() {
     showError('config', err.message);
     return;
   }
+
+  let engine = preferredEngine();
+  state.engine = engine;
+  trace('engine:choice', { engine, webgl: supportsWebGL() });
   try {
-    await loadAmap(cfg);
+    await loadAmap(cfg, engine);
   } catch (err) {
-    showError('script', err.message, { online: navigator.onLine });
-    return;
+    if (engine === '2.0') {
+      trace('engine:fallback-1.4', { reason: err.message });
+      try { window.AMap = undefined; } catch { /* ignore */ }
+      try {
+        await loadAmap(cfg, '1.4');
+        engine = '1.4';
+        state.engine = engine;
+      } catch (err2) {
+        showError('script', err2.message, { online: navigator.onLine });
+        return;
+      }
+    } else {
+      showError('script', err.message, { online: navigator.onLine });
+      return;
+    }
   }
   try {
-    startApp();
+    startApp(engine);
   } catch (err) {
     showError('init', err.message || '地图初始化异常');
   }
@@ -376,4 +463,21 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 els.overlayRetry.addEventListener('click', () => location.reload());
+
+els.overlayForce.addEventListener('click', () => {
+  trace('engine:force-1.4');
+  setEnginePreference('1.4');
+  location.reload();
+});
+
+els.overlayCopy.addEventListener('click', async () => {
+  const url = location.href;
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('地址已复制，可粘贴到 Chrome / Safari / 高德 App 打开', 6000);
+  } catch {
+    window.prompt('复制这个地址到其它浏览器打开：', url);
+  }
+});
+
 boot();

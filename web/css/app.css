@@ -980,6 +980,22 @@ body.kb-open .toast {
   cursor: pointer;
 }
 
+.overlay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.overlay-actions button[hidden] {
+  display: none;
+}
+
+#overlay-force {
+  border-color: rgba(53, 208, 127, 0.45);
+  background: rgba(53, 208, 127, 0.12);
+  color: #bff5d8;
+}
+
 .diag:empty {
   display: none;
 }
