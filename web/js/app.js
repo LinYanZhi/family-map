@@ -223,7 +223,14 @@ async function pickPoint(label, forcedChoice = null) {
 }
 
 function startApp() {
-  state.mapView = new MapView(window.AMap, els.map);
+  state.mapView = new MapView(window.AMap, els.map, {
+    onStyleResult: (key, ok, detail) => {
+      trace('style:check', { key, ok, ...detail });
+      if (!ok && key === 'dark') {
+        toast('暗黑样式数据加载失败（可能被网络拦截），已用滤镜兜底；换网络后可重试', 7000);
+      }
+    },
+  });
 
   state.sheet = createSheet({
     sheet: els.sheet,

@@ -43,6 +43,11 @@ body {
   cursor: crosshair;
 }
 
+/* 暗黑样式数据加载失败时的兜底：只反色地图画布，不影响标记/面板 */
+.map.dark-fallback .amap-layers canvas {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.95);
+}
+
 /* ===== 顶栏 ===== */
 .topbar {
   position: fixed;

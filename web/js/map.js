@@ -22,9 +22,12 @@ export function geolocationMessage(err) {
 }
 
 export class MapView {
-  constructor(AMap, el) {
+  constructor(AMap, el, options = {}) {
     this.AMap = AMap;
     this.el = el;
+    this.onStyleResult = typeof options.onStyleResult === 'function' ? options.onStyleResult : null;
+    this.styleTimer = 0;
+    this.darkFallback = false;
     this.styleKey = null;
     try {
       this.styleKey = localStorage.getItem(STYLE_KEY) || 'dark';
@@ -52,11 +55,49 @@ export class MapView {
     this.locationCircle = null;
 
     this.map.on('click', (event) => this._handleClick(event));
+    this._scheduleStyleCheck(this.styleKey);
   }
 
   _styleUri(key) {
     const found = MAP_STYLES.find((style) => style.key === key);
     return (found || MAP_STYLES[0]).uri;
+  }
+
+  // 高德暗黑样式数据来自 custyle.amap.com；被网络拦截时会静默保持亮色，这里检测并兜底
+  _styleEntries(key) {
+    try {
+      return performance.getEntriesByType('resource')
+        .filter((entry) => entry.name.includes('custyle') && entry.name.includes(`styleid=${key}`));
+    } catch {
+      return [];
+    }
+  }
+
+  _scheduleStyleCheck(key) {
+    clearTimeout(this.styleTimer);
+    const baseline = this._styleEntries(key).length;
+    this.styleTimer = setTimeout(() => {
+      const entries = this._styleEntries(key);
+      const latest = entries[entries.length - 1];
+      const ok = key === 'normal'
+        ? true
+        : Boolean(latest && latest.transferSize > 0 && entries.length > baseline);
+      this._setDarkFallback(key === 'dark' && !ok);
+      this.onStyleResult?.(key, ok, {
+        entries: entries.length,
+        baseline,
+        size: latest?.transferSize ?? 0,
+      });
+    }, 2800);
+  }
+
+  _setDarkFallback(on) {
+    this.darkFallback = Boolean(on);
+    this.el.classList.toggle('dark-fallback', this.darkFallback);
+  }
+
+  isDarkFallback() {
+    return this.darkFallback;
   }
 
   _handleClick(event) {
@@ -92,6 +133,7 @@ export class MapView {
     try {
       localStorage.setItem(STYLE_KEY, key);
     } catch { /* ignore */ }
+    this._scheduleStyleCheck(key);
     return key;
   }
 
